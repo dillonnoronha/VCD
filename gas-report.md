@@ -1,6 +1,6 @@
-# Gas Probe Results
+# Gas Measurements
 
-Baseline measurements from `scripts/gasProbe.ts` on Hardhat local network (Node 22.21.1, solidity 0.8.28, optimizer+viaIR):
+Baseline measurements taken on Hardhat local network (Node 22.21.1, solidity 0.8.28, optimizer+viaIR):
 
 - createSession: 435,590 gas
 - castVote (finalize=true): 199,112 gas
@@ -46,4 +46,5 @@ Notes:
 - Measurements are approximate and specific to the probed sequence; different allocations and branch choices will vary.
 - Anonymous voting remains the heaviest due to alias metadata and allocations.
 - Optimizer + `viaIR` enabled in `hardhat.config.ts`.
-- Hardhat coverage (test --coverage) currently ~90.8% line / 81.3% statement for `VotingHub.sol`; remaining uncovered paths are minor visibility/payment edges.
+- Hardhat coverage (test --coverage) ~100% line / ~92% statement for `VotingHub.sol`.
+- For fresh gas numbers, run `npx hardhat test --gas-stats` (built-in) instead of the removed manual probe script.
