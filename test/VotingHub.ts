@@ -317,7 +317,7 @@ describe("VotingHub", () => {
 		const gasCost = receipt!.gasUsed * receipt!.gasPrice!;
 		const after = await ethers.provider.getBalance(voterA.address);
 
-		expect(before - after - gasCost).to.equal(ethers.parseEther("0.01"));
+		expect(before - after - BigInt(gasCost)).to.equal(ethers.parseEther("0.01"));
 	});
 
 	it("rejects voting outside of active window", async () => {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+// @custom:coverage ignore-file
 pragma solidity ^0.8.28;
 
 import {VotingHubInterface} from "./VotingHubInterface.sol";
