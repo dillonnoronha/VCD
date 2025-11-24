@@ -28,4 +28,9 @@ Thumbs.db
 *.log
 .nyc_output/
 
+# Local docs/reports
+/gas-report.md
+/SECURITY.md
+/mise.toml
+
 /gas-report.md
