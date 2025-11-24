@@ -46,7 +46,7 @@ contract VotingHub is VotingErrors {
 	}
 
 	function transferOwnership(address newOwner) external onlyOwner {
-		require(newOwner != address(0), "Zero owner");
+		if (newOwner == address(0)) revert ZeroOwner();
 		owner = newOwner;
 	}
 
@@ -270,7 +270,7 @@ contract VotingHub is VotingErrors {
 		uint256 refund = msg.value - (units * s.pricePerWeight);
 		if (refund > 0) {
 			(bool ok, ) = msg.sender.call{value: refund}("");
-			require(ok, "Refund failed");
+			if (!ok) revert RefundFailed();
 		}
 
 		emit AdditionalWeightPurchased(sessionId, msg.sender, units, msg.value - refund);
@@ -471,7 +471,7 @@ contract VotingHub is VotingErrors {
 
 	function _session(uint256 sessionId) internal view returns (Session storage s) {
 		s = sessions[sessionId];
-		require(s.endTime != 0, "Session missing");
+		if (s.endTime == 0) revert SessionMissing();
 	}
 
 	function _isActive(Session storage s) internal view returns (bool) {

@@ -27,4 +27,7 @@ abstract contract VotingErrors {
 	error NoConfirmedVote();
 	error Reentrancy();
 	error StrategyNotSet();
+	error ZeroOwner();
+	error SessionMissing();
+	error RefundFailed();
 }

@@ -284,7 +284,10 @@ describe("VotingHub", () => {
 	});
 
 	it("handles ownership transfer rules", async () => {
-		await expect(hub.transferOwnership(ethers.ZeroAddress)).to.be.revertedWith("Zero owner");
+		await expect(hub.transferOwnership(ethers.ZeroAddress)).to.be.revertedWithCustomError(
+			hub,
+			"ZeroOwner",
+		);
 		await hub.transferOwnership(viewer.address);
 		expect(await hub.owner()).to.equal(viewer.address);
 		await expect(hub.transferOwnership(voterA.address)).to.be.revertedWithCustomError(
@@ -472,7 +475,7 @@ describe("VotingHub", () => {
 		const attacker = await Attacker.deploy(await hub.getAddress(), active);
 		await expect(
 			attacker.connect(owner).attack({ value: ethers.parseEther("0.015") }),
-		).to.be.revertedWith("Refund failed");
+		).to.be.revertedWithCustomError(hub, "RefundFailed");
 	});
 
 	it("covers emitSessionEnd double call and missing session guard", async () => {
@@ -481,7 +484,7 @@ describe("VotingHub", () => {
 		const sessionId = await createSession({ startTime: now - 100n, endTime: now - 10n });
 		await hub.emitSessionEnd(sessionId);
 		await expect(hub.emitSessionEnd(sessionId)).to.be.revertedWithCustomError(hub, "AlreadyEmitted");
-		await expect(hub.getOptions(9999)).to.be.revertedWith("Session missing");
+		await expect(hub.getOptions(9999)).to.be.revertedWithCustomError(hub, "SessionMissing");
 	});
 
 	it("covers inactive emitSessionEnd and delegate reverts", async () => {
