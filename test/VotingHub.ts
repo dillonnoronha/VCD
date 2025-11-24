@@ -343,6 +343,20 @@ describe("VotingHub", () => {
 		).to.be.revertedWithCustomError(hub, "ValueTooLow");
 	});
 
+	it("allows strategy updates and rejects unset strategy", async () => {
+		const Strategy = await ethers.getContractFactory("WeightedSplitStrategy", owner);
+		const newStrategy = await Strategy.deploy();
+		await expect(hub.setStrategy(0, ethers.ZeroAddress)).to.be.revertedWithCustomError(
+			hub,
+			"StrategyNotSet",
+		);
+		await hub.setStrategy(0, newStrategy);
+		const sessionId = await createSession({ algorithm: 0 });
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
+		const totals = await hub.connect(viewer).getOptionTotals(sessionId);
+		expect(totals[0]).to.equal(1n);
+	});
+
 	it("emits reveal results and exposes canSeeResults helper", async () => {
 		const sessionId = await createSession();
 		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);

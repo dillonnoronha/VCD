@@ -1,38 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {
+	Algorithm,
+	VoteStatus,
+	Option,
+	Allocation,
+	VoteRecord,
+	VoterState,
+	AnonMeta,
+	Session
+} from "./voting/Types.sol";
+import {VotingErrors} from "./voting/Errors.sol";
+import {IVotingStrategy} from "./voting/strategies/IVotingStrategy.sol";
+import {WeightedSplitStrategy} from "./voting/strategies/WeightedSplitStrategy.sol";
+
 /**
  * @title VotingHub
  * @notice Flexible on-chain voting hub supporting multiple concurrent sessions, weighted voting,
  * delegation, anonymous aliases, optional result concealment, and vote lifecycle controls.
  */
-contract VotingHub {
-	// --- Custom errors ---
-	error NotOwner();
-	error OptionsRequired();
-	error OptionMismatch();
-	error InvalidWindow();
-	error Inactive();
-	error Delegated();
-	error BadOption();
-	error BadWeight();
-	error AnonDisabled();
-	error AnonIdRequired();
-	error NotAuthorized();
-	error AlreadyPublic();
-	error AlreadyEmitted();
-	error SelfDelegation();
-	error AlreadyVoted();
-	error DelegationLoop();
-	error NoWeight();
-	error ValueTooLow();
-	error PriceUnset();
-	error PurchasesOff();
-	error NothingPending();
-	error NoVote();
-	error NoConfirmedVote();
-	error Reentrancy();
-
+contract VotingHub is VotingErrors {
 	// --- Ownership ---
 	address public owner;
 	uint256 private unlocked = 1;
@@ -51,6 +39,10 @@ contract VotingHub {
 
 	constructor() {
 		owner = msg.sender;
+		IVotingStrategy defaultStrategy = new WeightedSplitStrategy();
+		strategies[Algorithm.OnePersonOneVote] = defaultStrategy;
+		strategies[Algorithm.RankedChoice] = defaultStrategy;
+		strategies[Algorithm.WeightedSplit] = defaultStrategy;
 	}
 
 	function transferOwnership(address newOwner) external onlyOwner {
@@ -58,71 +50,8 @@ contract VotingHub {
 		owner = newOwner;
 	}
 
-	// --- Data structures ---
-	enum Algorithm {
-		OnePersonOneVote,
-		RankedChoice,
-		WeightedSplit
-	}
-
-	enum VoteStatus {
-		None,
-		Pending,
-		Confirmed
-	}
-
-	struct Option {
-		string name;
-		uint256 weight; // multiplier for the option itself (default 1)
-	}
-
-	struct Allocation {
-		uint256 optionId;
-		uint256 weight; // raw weight from voter assigned to the option
-	}
-
-	struct VoteRecord {
-		VoteStatus status;
-		bool anonymousVote;
-		bytes32 anonId;
-		uint256 usedWeight;
-		Allocation[] allocations;
-	}
-
-	struct VoterState {
-		uint256 baseWeight; // default or admin-set weight
-		uint256 purchasedWeight; // acquired via ETH payments
-		bool delegated; // true once voter delegated away their weight
-		address delegate;
-		bool exists;
-	}
-
-	struct AnonMeta {
-		VoteStatus status;
-		uint256 usedWeight;
-	}
-
-	struct Session {
-		string name;
-		uint256 startTime;
-		uint256 endTime;
-		uint256 revealTime;
-		Algorithm algorithm;
-		bool allowAnonymous;
-		bool allowMultiVoteWithEth;
-		bool concealResults;
-		bool revealed;
-		bool endedEventEmitted;
-		uint256 pricePerWeight;
-		Option[] options;
-		address creator;
-		address[] authorizedList;
-		mapping(address => bool) authorizedViewers;
-		mapping(address => VoterState) voterStates;
-		mapping(address => VoteRecord) votes;
-		mapping(bytes32 => AnonMeta) anonVotes;
-		mapping(uint256 => uint256) optionTotals; // aggregated (voter weight * option weight)
-	}
+	// --- Strategy registry ---
+	mapping(Algorithm => IVotingStrategy) public strategies;
 
 	uint256 public nextSessionId;
 	mapping(uint256 => Session) private sessions;
@@ -201,6 +130,11 @@ contract VotingHub {
 		if (allowed) {
 			s.authorizedList.push(viewer);
 		}
+	}
+
+	function setStrategy(Algorithm algorithm, IVotingStrategy strategy) external onlyOwner {
+		if (address(strategy) == address(0)) revert StrategyNotSet();
+		strategies[algorithm] = strategy;
 	}
 
 	function setVoterWeight(uint256 sessionId, address voter, uint256 weight) external onlyOwner {
@@ -470,13 +404,17 @@ contract VotingHub {
 	}
 
 	function _applyToTotals(Session storage s, VoteRecord storage vr, bool add) internal {
-		for (uint256 i = 0; i < vr.allocations.length; ) {
-			Allocation storage alloc = vr.allocations[i];
-			uint256 weighted = alloc.weight * s.options[alloc.optionId].weight;
+		IVotingStrategy strat = strategies[s.algorithm];
+		if (address(strat) == address(0)) revert StrategyNotSet();
+
+		Allocation[] memory allocs = _copyAllocations(vr.allocations);
+		Option[] memory opts = _copyOptions(s.options);
+		uint256[] memory weights = strat.computeWeights(allocs, opts);
+		for (uint256 i; i < weights.length; ) {
 			if (add) {
-				s.optionTotals[alloc.optionId] += weighted;
+				s.optionTotals[i] += weights[i];
 			} else {
-				s.optionTotals[alloc.optionId] -= weighted;
+				s.optionTotals[i] -= weights[i];
 			}
 			unchecked {
 				++i;
@@ -485,7 +423,7 @@ contract VotingHub {
 	}
 
 	function _distributeExtraWeight(Session storage s, VoteRecord storage vr, uint256 addedWeight) internal {
-		require(vr.status == VoteStatus.Confirmed, "No confirmed vote");
+		if (vr.status != VoteStatus.Confirmed) revert NoConfirmedVote();
 		if (addedWeight == 0 || vr.usedWeight == 0) return;
 
 		uint256 remaining = addedWeight;
@@ -507,6 +445,26 @@ contract VotingHub {
 	}
 
 	// --- internal utils ---
+	function _copyAllocations(Allocation[] storage allocations) internal view returns (Allocation[] memory out) {
+		out = new Allocation[](allocations.length);
+		for (uint256 i; i < allocations.length; ) {
+			out[i] = allocations[i];
+			unchecked {
+				++i;
+			}
+		}
+	}
+
+	function _copyOptions(Option[] storage options_) internal view returns (Option[] memory out) {
+		out = new Option[](options_.length);
+		for (uint256 i; i < options_.length; ) {
+			out[i] = options_[i];
+			unchecked {
+				++i;
+			}
+		}
+	}
+
 	function _session(uint256 sessionId) internal view returns (Session storage s) {
 		s = sessions[sessionId];
 		require(s.endTime != 0, "Session missing");
