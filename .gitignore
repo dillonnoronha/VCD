@@ -28,5 +28,4 @@ Thumbs.db
 *.log
 .nyc_output/
 
-# Keep Solidity, config, scripts, tests; ignore everything else under node_modules, coverage, build artifacts already listed.
-gas-report.md
+/gas-report.md
