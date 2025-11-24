@@ -14,6 +14,7 @@ describe("VotingHub", () => {
 	let voterB: any;
 	let voterC: any;
 	let diamond: any;
+	let coreImpl: string;
 
 	const advanceTime = async (seconds: number) => {
 		await ethers.provider.send("evm_increaseTime", [seconds]);
@@ -80,6 +81,7 @@ describe("VotingHub", () => {
 		const strategy = await Strategy.deploy();
 		const admin = await Admin.deploy();
 		const weighted = await WeightedStrategy.deploy();
+		coreImpl = await core.getAddress();
 
 		const selectorDefs = [
 			{ sig: "createSession(string,string[],uint256[],uint256,uint256,uint256,uint8,bool,bool,bool,address[],uint256)", impl: core },
@@ -457,6 +459,9 @@ describe("VotingHub", () => {
 			hub,
 			"AlreadyPublic",
 		);
+
+		await hub.setAuthorizedViewer(publicSession, viewer.address, true);
+		await hub.setAuthorizedViewer(publicSession, viewer.address, true);
 	});
 
 	it("covers anon errors and inactive confirm/revoke", async () => {
@@ -506,6 +511,12 @@ describe("VotingHub", () => {
 		await expect(
 			hub.connect(voterC).delegateVote(zeroWeightSession, voterB.address),
 		).to.be.revertedWithCustomError(hub, "NoWeight");
+
+		const loopSession = await createSession();
+		await hub.connect(voterA).delegateVote(loopSession, voterB.address);
+		await expect(
+			hub.connect(voterB).delegateVote(loopSession, voterA.address),
+		).to.be.revertedWithCustomError(hub, "DelegationLoop");
 	});
 
 	it("covers purchase restrictions and reentrancy", async () => {
@@ -520,6 +531,10 @@ describe("VotingHub", () => {
 		await expect(
 			hub.connect(voterA).purchaseWeight(ended, { value: pricePerWeight }),
 		).to.be.revertedWithCustomError(hub, "Inactive");
+
+		await expect(
+			hub.connect(voterA).purchaseWeight(9999, { value: pricePerWeight }),
+		).to.be.revertedWithCustomError(hub, "SessionMissing");
 
 		const active = await createSession({ pricePerWeight: ethers.parseEther("0.01") });
 		const Attacker = await ethers.getContractFactory("ReenterPurchaser", owner);
@@ -573,6 +588,14 @@ describe("VotingHub", () => {
 		await expect(
 			hub.connect(voterA).castVote(sessionId2, [{ optionId: 0n, weight: 1n }], true),
 		).to.be.revertedWithCustomError(hub, "StrategyNotSet");
+
+		await expect(
+			hub.connect(voterA).setStrategy(0, viewer.address),
+		).to.be.revertedWithCustomError(hub, "NotOwner");
+
+		await expect(
+			hub.connect(voterA).clearStrategy(0),
+		).to.be.revertedWithCustomError(hub, "NotOwner");
 	});
 
 	it("covers bad weight and NoConfirmedVote defensive path", async () => {
@@ -588,5 +611,30 @@ describe("VotingHub", () => {
 		await expect(
 			hub.connect(voterA).getWinners(sessionId),
 		).to.be.revertedWithCustomError(hub, "NotAuthorized");
+	});
+
+	it("reverts on unknown selector and admin session missing", async () => {
+		const unknown = new ethers.Contract(await diamond.getAddress(), ["function noSuchFn() view returns (uint256)"], owner);
+		await expect(unknown.noSuchFn()).to.be.revertedWithCustomError(hub, "StrategyNotSet");
+
+		await expect(
+			hub.connect(owner).setVoterWeight(9999, voterA.address, 5n),
+		).to.be.revertedWithCustomError(hub, "SessionMissing");
+
+		await expect(
+			diamond.connect(voterA).setFacet("0x12345678", coreImpl),
+		).to.be.revertedWithCustomError(hub, "NotOwner");
+		await diamond.setFacet("0x12345678", coreImpl);
+	});
+
+	it("covers additional admin and reveal error branches", async () => {
+		const nextId = await hub.nextSessionId();
+		expect(nextId).to.equal(0n);
+		await expect(hub.revealResults(9999)).to.be.revertedWithCustomError(hub, "SessionMissing");
+		await expect(hub.setAuthorizedViewer(9999, viewer.address, true)).to.be.revertedWithCustomError(
+			hub,
+			"SessionMissing",
+		);
+		await hub.clearStrategy(1);
 	});
 });

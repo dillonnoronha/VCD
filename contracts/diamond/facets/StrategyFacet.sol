@@ -21,8 +21,4 @@ contract StrategyFacet is VotingErrors {
 	function clearStrategy(Algorithm algorithm) external onlyOwner {
 		delete VotingStorage.layout().strategies[algorithm];
 	}
-
-	function owner() external view returns (address) {
-		return VotingStorage.layout().owner;
-	}
 }
