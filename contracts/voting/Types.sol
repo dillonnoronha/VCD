@@ -57,11 +57,8 @@ struct Session {
 	bool endedEventEmitted;
 	uint256 pricePerWeight;
 	Option[] options;
-	address creator;
-	address[] authorizedList;
 	mapping(address => bool) authorizedViewers;
 	mapping(address => VoterState) voterStates;
 	mapping(address => VoteRecord) votes;
-	mapping(bytes32 => AnonMeta) anonVotes;
 	mapping(uint256 => uint256) optionTotals;
 }

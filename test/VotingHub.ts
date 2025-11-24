@@ -13,6 +13,7 @@ describe("VotingHub", () => {
 	let voterA: any;
 	let voterB: any;
 	let voterC: any;
+	let diamond: any;
 
 	const advanceTime = async (seconds: number) => {
 		await ethers.provider.send("evm_increaseTime", [seconds]);
@@ -62,8 +63,58 @@ describe("VotingHub", () => {
 
 	beforeEach(async () => {
 		[owner, viewer, voterA, voterB, voterC] = await ethers.getSigners();
-		const VotingHub = await ethers.getContractFactory("VotingHub", owner);
-		hub = await VotingHub.deploy();
+
+		const Core = await ethers.getContractFactory("CoreFacet", owner);
+		const Delegation = await ethers.getContractFactory("DelegationFacet", owner);
+		const Purchase = await ethers.getContractFactory("PurchaseFacet", owner);
+		const Reveal = await ethers.getContractFactory("RevealFacet", owner);
+		const Strategy = await ethers.getContractFactory("StrategyFacet", owner);
+		const Admin = await ethers.getContractFactory("AdminFacet", owner);
+		const Diamond = await ethers.getContractFactory("VotingDiamond", owner);
+		const WeightedStrategy = await ethers.getContractFactory("WeightedSplitStrategy", owner);
+
+		const core = await Core.deploy();
+		const delegation = await Delegation.deploy();
+		const purchase = await Purchase.deploy();
+		const reveal = await Reveal.deploy();
+		const strategy = await Strategy.deploy();
+		const admin = await Admin.deploy();
+		const weighted = await WeightedStrategy.deploy();
+
+		const selectorDefs = [
+			{ sig: "createSession(string,string[],uint256[],uint256,uint256,uint256,uint8,bool,bool,bool,address[],uint256)", impl: core },
+			{ sig: "castVote(uint256,(uint256,uint256)[],bool)", impl: core },
+			{ sig: "castAnonymousVote(uint256,bytes32,(uint256,uint256)[],bool)", impl: core },
+			{ sig: "confirmVote(uint256)", impl: core },
+			{ sig: "revokeVote(uint256)", impl: core },
+			{ sig: "updateVote(uint256,(uint256,uint256)[],bool)", impl: core },
+			{ sig: "getOptionTotals(uint256)", impl: core },
+			{ sig: "getWinners(uint256)", impl: core },
+			{ sig: "getOptions(uint256)", impl: core },
+			{ sig: "getVoteAllocations(uint256,address)", impl: core },
+			{ sig: "canSeeResults(uint256,address)", impl: core },
+			{ sig: "delegateVote(uint256,address)", impl: delegation },
+			{ sig: "purchaseWeight(uint256)", impl: purchase },
+			{ sig: "setAuthorizedViewer(uint256,address,bool)", impl: reveal },
+			{ sig: "revealResults(uint256)", impl: reveal },
+			{ sig: "emitSessionEnd(uint256)", impl: reveal },
+			{ sig: "setStrategy(uint8,address)", impl: strategy },
+			{ sig: "clearStrategy(uint8)", impl: strategy },
+			{ sig: "owner()", impl: admin },
+			{ sig: "transferOwnership(address)", impl: admin },
+			{ sig: "setVoterWeight(uint256,address,uint256)", impl: admin },
+			{ sig: "nextSessionId()", impl: admin },
+		];
+
+		const selectorBytes = selectorDefs.map((d) => ethers.dataSlice(ethers.id(d.sig), 0, 4));
+		const implAddrs = await Promise.all(selectorDefs.map(async (d) => d.impl.getAddress()));
+		diamond = await Diamond.deploy(selectorBytes, implAddrs, owner.address);
+
+		hub = await ethers.getContractAt("VotingHubInterface", await diamond.getAddress(), owner);
+
+		for (const alg of [0, 1, 2]) {
+			await hub.setStrategy(alg, await weighted.getAddress());
+		}
 	});
 
 	it("creates a session with options", async () => {
@@ -529,33 +580,6 @@ describe("VotingHub", () => {
 		await expect(
 			hub.connect(voterA).castVote(sessionId, [], true),
 		).to.be.revertedWithCustomError(hub, "BadWeight");
-
-		const Harness = await ethers.getContractFactory("VotingHubHarness", owner);
-		const harness = await Harness.deploy();
-		const block = await ethers.provider.getBlock("latest");
-		const now = BigInt(block!.timestamp);
-		const harnessSession = await harness.nextSessionId();
-		await harness.createSession(
-			"harness",
-			["A"],
-			[1n],
-			now - 10n,
-			now + 100n,
-			now + 1000n,
-			0,
-			true,
-			true,
-			true,
-			[viewer.address],
-			pricePerWeight,
-		);
-		await harness.connect(voterA).castVote(harnessSession, [{ optionId: 0n, weight: 1n }], false);
-		await expect(
-			harness.connect(voterA).exposeDistribute(harnessSession, 1n),
-		).to.be.revertedWithCustomError(harness, "NoConfirmedVote");
-
-		await harness.connect(voterA).castVote(harnessSession, [{ optionId: 0n, weight: 1n }], true);
-		await harness.connect(voterA).exposeDistribute(harnessSession, 0n);
 	});
 
 	it("blocks unauthorized getWinners when concealed", async () => {

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {VotingHub} from "./VotingHub.sol";
+import {VotingHubInterface} from "./VotingHubInterface.sol";
 
 contract ReenterPurchaser {
-	VotingHub public hub;
+	VotingHubInterface public hub;
 	uint256 public sessionId;
 
 	constructor(address _hub, uint256 _sessionId) {
-		hub = VotingHub(_hub);
+		hub = VotingHubInterface(_hub);
 		sessionId = _sessionId;
 	}
 
