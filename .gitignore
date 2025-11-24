@@ -8,6 +8,7 @@
 /cache
 /types
 /coverage
+/build
 
 # Hardhat generated configs and env
 /.env
@@ -21,3 +22,10 @@
 
 # pnpm deploy output
 /bundle
+
+# OS/editor noise
+Thumbs.db
+*.log
+.nyc_output/
+
+# Keep Solidity, config, scripts, tests; ignore everything else under node_modules, coverage, build artifacts already listed.
