@@ -27,3 +27,17 @@ Optimized (custom errors + lighter anon storage):
 - purchaseWeight: 84,513 gas
 - castAnonymousVote: 286,636 gas
 - revealResults: 32,498 gas
+
+Current (with reentrancy guard on purchases):
+
+- createSession: 435,566 gas
+- castVote (finalize=true): 199,078 gas
+- castVote (update): 102,987 gas
+- castVote (prepare only): 58,840 gas
+- confirmVote: 71,147 gas
+- revokeVote: 50,482 gas
+- delegateVote: 86,397 gas
+- castVote (delegated weight): 158,945 gas
+- purchaseWeight: 86,843 gas
+- castAnonymousVote: 286,636 gas
+- revealResults: 32,498 gas

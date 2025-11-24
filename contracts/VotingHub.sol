@@ -7,37 +7,46 @@ pragma solidity ^0.8.28;
  * delegation, anonymous aliases, optional result concealment, and vote lifecycle controls.
  */
 contract VotingHub {
-    // --- Custom errors ---
-    error NotOwner();
-    error OptionsRequired();
-    error OptionMismatch();
-    error InvalidWindow();
-    error Inactive();
-    error Delegated();
-    error BadOption();
-    error BadWeight();
-    error AnonDisabled();
-    error AnonIdRequired();
-    error NotAuthorized();
-    error AlreadyPublic();
-    error AlreadyEmitted();
-    error SelfDelegation();
-    error AlreadyVoted();
-    error DelegationLoop();
-    error NoWeight();
+	// --- Custom errors ---
+	error NotOwner();
+	error OptionsRequired();
+	error OptionMismatch();
+	error InvalidWindow();
+	error Inactive();
+	error Delegated();
+	error BadOption();
+	error BadWeight();
+	error AnonDisabled();
+	error AnonIdRequired();
+	error NotAuthorized();
+	error AlreadyPublic();
+	error AlreadyEmitted();
+	error SelfDelegation();
+	error AlreadyVoted();
+	error DelegationLoop();
+	error NoWeight();
     error ValueTooLow();
     error PriceUnset();
     error PurchasesOff();
     error NothingPending();
     error NoVote();
     error NoConfirmedVote();
+    error Reentrancy();
 
-    // --- Ownership ---
+	// --- Ownership ---
     address public owner;
+    uint256 private unlocked = 1;
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
+    }
+
+    modifier nonReentrant() {
+        if (unlocked == 0) revert Reentrancy();
+        unlocked = 0;
+        _;
+        unlocked = 1;
     }
 
 	constructor() {
@@ -80,23 +89,23 @@ contract VotingHub {
 		Allocation[] allocations;
 	}
 
-    struct VoterState {
-        uint256 baseWeight; // default or admin-set weight
-        uint256 purchasedWeight; // acquired via ETH payments
-        bool delegated; // true once voter delegated away their weight
-        address delegate;
-        bool exists;
-    }
+	struct VoterState {
+		uint256 baseWeight; // default or admin-set weight
+		uint256 purchasedWeight; // acquired via ETH payments
+		bool delegated; // true once voter delegated away their weight
+		address delegate;
+		bool exists;
+	}
 
-    struct AnonMeta {
-        VoteStatus status;
-        uint256 usedWeight;
-    }
+	struct AnonMeta {
+		VoteStatus status;
+		uint256 usedWeight;
+	}
 
-    struct Session {
-        string name;
-        uint256 startTime;
-        uint256 endTime;
+	struct Session {
+		string name;
+		uint256 startTime;
+		uint256 endTime;
 		uint256 revealTime;
 		Algorithm algorithm;
 		bool allowAnonymous;
@@ -107,13 +116,13 @@ contract VotingHub {
 		uint256 pricePerWeight;
 		Option[] options;
 		address creator;
-        address[] authorizedList;
-        mapping(address => bool) authorizedViewers;
-        mapping(address => VoterState) voterStates;
-        mapping(address => VoteRecord) votes;
-        mapping(bytes32 => AnonMeta) anonVotes;
-        mapping(uint256 => uint256) optionTotals; // aggregated (voter weight * option weight)
-    }
+		address[] authorizedList;
+		mapping(address => bool) authorizedViewers;
+		mapping(address => VoterState) voterStates;
+		mapping(address => VoteRecord) votes;
+		mapping(bytes32 => AnonMeta) anonVotes;
+		mapping(uint256 => uint256) optionTotals; // aggregated (voter weight * option weight)
+	}
 
 	uint256 public nextSessionId;
 	mapping(uint256 => Session) private sessions;
@@ -141,12 +150,12 @@ contract VotingHub {
 		bool allowAnonymous,
 		bool allowMultiVoteWithEth,
 		bool concealResults,
-        address[] memory authorizedViewers,
-        uint256 pricePerWeight
-    ) external onlyOwner returns (uint256 id) {
-        if (optionNames.length == 0) revert OptionsRequired();
-        if (optionNames.length != optionWeights.length) revert OptionMismatch();
-        if (startTime >= endTime) revert InvalidWindow();
+		address[] memory authorizedViewers,
+		uint256 pricePerWeight
+	) external onlyOwner returns (uint256 id) {
+		if (optionNames.length == 0) revert OptionsRequired();
+		if (optionNames.length != optionWeights.length) revert OptionMismatch();
+		if (startTime >= endTime) revert InvalidWindow();
 
 		id = nextSessionId++;
 		Session storage s = sessions[id];
@@ -155,11 +164,11 @@ contract VotingHub {
 		s.endTime = endTime;
 		s.revealTime = revealTime == 0 ? endTime : revealTime;
 		s.algorithm = algorithm;
-        s.allowAnonymous = allowAnonymous;
-        s.allowMultiVoteWithEth = allowMultiVoteWithEth;
-        s.concealResults = concealResults;
-        s.pricePerWeight = pricePerWeight;
-        s.creator = msg.sender;
+		s.allowAnonymous = allowAnonymous;
+		s.allowMultiVoteWithEth = allowMultiVoteWithEth;
+		s.concealResults = concealResults;
+		s.pricePerWeight = pricePerWeight;
+		s.creator = msg.sender;
 
 		for (uint256 i = 0; i < optionNames.length; ) {
 			uint256 optWeight = optionWeights[i] == 0 ? 1 : optionWeights[i];
@@ -200,21 +209,21 @@ contract VotingHub {
 		st.baseWeight = weight;
 	}
 
-    function revealResults(uint256 sessionId) external {
-        Session storage s = _session(sessionId);
-        if (!s.concealResults) revert AlreadyPublic();
-        if (!_isAuthorizedViewer(s, msg.sender) && msg.sender != owner) revert NotAuthorized();
-        s.revealed = true;
-        emit ResultsRevealed(sessionId, block.timestamp);
-    }
+	function revealResults(uint256 sessionId) external {
+		Session storage s = _session(sessionId);
+		if (!s.concealResults) revert AlreadyPublic();
+		if (!_isAuthorizedViewer(s, msg.sender) && msg.sender != owner) revert NotAuthorized();
+		s.revealed = true;
+		emit ResultsRevealed(sessionId, block.timestamp);
+	}
 
-    function emitSessionEnd(uint256 sessionId) external {
-        Session storage s = _session(sessionId);
-        if (block.timestamp < s.endTime) revert Inactive();
-        if (s.endedEventEmitted) revert AlreadyEmitted();
-        s.endedEventEmitted = true;
-        emit SessionEnded(sessionId);
-    }
+	function emitSessionEnd(uint256 sessionId) external {
+		Session storage s = _session(sessionId);
+		if (block.timestamp < s.endTime) revert Inactive();
+		if (s.endedEventEmitted) revert AlreadyEmitted();
+		s.endedEventEmitted = true;
+		emit SessionEnded(sessionId);
+	}
 
 	// --- Voting entry points ---
 	function castVote(
@@ -225,33 +234,33 @@ contract VotingHub {
 		_cast(sessionId, msg.sender, false, bytes32(0), allocations, finalize);
 	}
 
-    function castAnonymousVote(
-        uint256 sessionId,
-        bytes32 anonId,
-        Allocation[] memory allocations,
-        bool finalize
-    ) external {
-        Session storage s = _session(sessionId);
-        if (!s.allowAnonymous) revert AnonDisabled();
-        if (anonId == bytes32(0)) revert AnonIdRequired();
-        _cast(sessionId, msg.sender, true, anonId, allocations, finalize);
-    }
+	function castAnonymousVote(
+		uint256 sessionId,
+		bytes32 anonId,
+		Allocation[] memory allocations,
+		bool finalize
+	) external {
+		Session storage s = _session(sessionId);
+		if (!s.allowAnonymous) revert AnonDisabled();
+		if (anonId == bytes32(0)) revert AnonIdRequired();
+		_cast(sessionId, msg.sender, true, anonId, allocations, finalize);
+	}
 
-    function confirmVote(uint256 sessionId) external {
-        Session storage s = _session(sessionId);
-        if (!_isActive(s)) revert Inactive();
-        VoteRecord storage vr = s.votes[msg.sender];
-        if (vr.status != VoteStatus.Pending) revert NothingPending();
-        _applyToTotals(s, vr, true);
-        vr.status = VoteStatus.Confirmed;
-        emit VoteCast(sessionId, msg.sender, vr.anonId, vr.usedWeight);
-    }
+	function confirmVote(uint256 sessionId) external {
+		Session storage s = _session(sessionId);
+		if (!_isActive(s)) revert Inactive();
+		VoteRecord storage vr = s.votes[msg.sender];
+		if (vr.status != VoteStatus.Pending) revert NothingPending();
+		_applyToTotals(s, vr, true);
+		vr.status = VoteStatus.Confirmed;
+		emit VoteCast(sessionId, msg.sender, vr.anonId, vr.usedWeight);
+	}
 
-    function revokeVote(uint256 sessionId) external {
-        Session storage s = _session(sessionId);
-        if (!_isActive(s)) revert Inactive();
-        VoteRecord storage vr = s.votes[msg.sender];
-        if (vr.status == VoteStatus.None) revert NoVote();
+	function revokeVote(uint256 sessionId) external {
+		Session storage s = _session(sessionId);
+		if (!_isActive(s)) revert Inactive();
+		VoteRecord storage vr = s.votes[msg.sender];
+		if (vr.status == VoteStatus.None) revert NoVote();
 
 		if (vr.status == VoteStatus.Confirmed) {
 			_applyToTotals(s, vr, false);
@@ -271,25 +280,25 @@ contract VotingHub {
 		emit VoteUpdated(sessionId, msg.sender, bytes32(0), _sumAllocations(allocations));
 	}
 
-    function delegateVote(uint256 sessionId, address to) external {
-        Session storage s = _session(sessionId);
-        if (!_isActive(s)) revert Inactive();
-        if (to == msg.sender) revert SelfDelegation();
-        VoteRecord storage vr = s.votes[msg.sender];
-        if (vr.status != VoteStatus.None) revert AlreadyVoted();
+	function delegateVote(uint256 sessionId, address to) external {
+		Session storage s = _session(sessionId);
+		if (!_isActive(s)) revert Inactive();
+		if (to == msg.sender) revert SelfDelegation();
+		VoteRecord storage vr = s.votes[msg.sender];
+		if (vr.status != VoteStatus.None) revert AlreadyVoted();
 
-        VoterState storage fromState = _ensureState(s, msg.sender);
-        if (fromState.delegated) revert Delegated();
+		VoterState storage fromState = _ensureState(s, msg.sender);
+		if (fromState.delegated) revert Delegated();
 
-        address cursor = to;
-        while (sessions[sessionId].voterStates[cursor].delegate != address(0)) {
-            cursor = sessions[sessionId].voterStates[cursor].delegate;
-            if (cursor == msg.sender) revert DelegationLoop();
-        }
+		address cursor = to;
+		while (sessions[sessionId].voterStates[cursor].delegate != address(0)) {
+			cursor = sessions[sessionId].voterStates[cursor].delegate;
+			if (cursor == msg.sender) revert DelegationLoop();
+		}
 
-        VoterState storage toState = _ensureState(s, to);
-        uint256 transferable = _availableWeight(fromState);
-        if (transferable == 0) revert NoWeight();
+		VoterState storage toState = _ensureState(s, to);
+		uint256 transferable = _availableWeight(fromState);
+		if (transferable == 0) revert NoWeight();
 
 		fromState.delegated = true;
 		fromState.delegate = to;
@@ -305,13 +314,13 @@ contract VotingHub {
 		emit VoteDelegated(sessionId, msg.sender, to, transferable);
 	}
 
-    function purchaseWeight(uint256 sessionId) external payable {
+    function purchaseWeight(uint256 sessionId) external payable nonReentrant {
         Session storage s = _session(sessionId);
         if (!_isActive(s)) revert Inactive();
         if (!s.allowMultiVoteWithEth) revert PurchasesOff();
         if (s.pricePerWeight == 0) revert PriceUnset();
         uint256 units = msg.value / s.pricePerWeight;
-        if (units == 0) revert ValueTooLow();
+		if (units == 0) revert ValueTooLow();
 
 		VoterState storage st = _ensureState(s, msg.sender);
 		st.purchasedWeight += units;
@@ -330,19 +339,19 @@ contract VotingHub {
 	}
 
 	// --- Views ---
-    function getOptionTotals(uint256 sessionId) external view returns (uint256[] memory totals) {
-        Session storage s = _session(sessionId);
-        if (!_canSeeResults(s, msg.sender)) revert NotAuthorized();
-        totals = new uint256[](s.options.length);
-        for (uint256 i = 0; i < s.options.length; i++) {
-            totals[i] = s.optionTotals[i];
-        }
-    }
+	function getOptionTotals(uint256 sessionId) external view returns (uint256[] memory totals) {
+		Session storage s = _session(sessionId);
+		if (!_canSeeResults(s, msg.sender)) revert NotAuthorized();
+		totals = new uint256[](s.options.length);
+		for (uint256 i = 0; i < s.options.length; i++) {
+			totals[i] = s.optionTotals[i];
+		}
+	}
 
-    function getWinners(uint256 sessionId) external view returns (uint256[] memory winners) {
-        Session storage s = _session(sessionId);
-        if (!_canSeeResults(s, msg.sender)) revert NotAuthorized();
-        uint256 best;
+	function getWinners(uint256 sessionId) external view returns (uint256[] memory winners) {
+		Session storage s = _session(sessionId);
+		if (!_canSeeResults(s, msg.sender)) revert NotAuthorized();
+		uint256 best;
 		for (uint256 i = 0; i < s.options.length; i++) {
 			if (s.optionTotals[i] > best) {
 				best = s.optionTotals[i];
@@ -369,16 +378,16 @@ contract VotingHub {
 		}
 	}
 
-    function getVoteAllocations(uint256 sessionId, address voter)
-        external
-        view
-        returns (VoteStatus status, Allocation[] memory allocations, bool anonymousVote, bytes32 anonId, uint256 usedWeight)
-    {
-        Session storage s = _session(sessionId);
-        if (!_isAuthorizedViewer(s, msg.sender) && msg.sender != voter && msg.sender != owner) {
-            revert NotAuthorized();
-        }
-        VoteRecord storage vr = s.votes[voter];
+	function getVoteAllocations(uint256 sessionId, address voter)
+		external
+		view
+		returns (VoteStatus status, Allocation[] memory allocations, bool anonymousVote, bytes32 anonId, uint256 usedWeight)
+	{
+		Session storage s = _session(sessionId);
+		if (!_isAuthorizedViewer(s, msg.sender) && msg.sender != voter && msg.sender != owner) {
+			revert NotAuthorized();
+		}
+		VoteRecord storage vr = s.votes[voter];
 		status = vr.status;
 		anonymousVote = vr.anonymousVote;
 		anonId = vr.anonId;
@@ -403,23 +412,23 @@ contract VotingHub {
 		Allocation[] memory allocations,
 		bool finalize
 	) internal {
-        Session storage s = _session(sessionId);
-        if (!_isActive(s)) revert Inactive();
-        if (allocations.length == 0) revert BadWeight();
+		Session storage s = _session(sessionId);
+		if (!_isActive(s)) revert Inactive();
+		if (allocations.length == 0) revert BadWeight();
 
-        VoterState storage st = _ensureState(s, voter);
-        if (st.delegated) revert Delegated();
+		VoterState storage st = _ensureState(s, voter);
+		if (st.delegated) revert Delegated();
 
-        for (uint256 i = 0; i < allocations.length; ) {
-            if (allocations[i].optionId >= s.options.length) revert BadOption();
-            unchecked {
-                ++i;
-            }
-        }
+		for (uint256 i = 0; i < allocations.length; ) {
+			if (allocations[i].optionId >= s.options.length) revert BadOption();
+			unchecked {
+				++i;
+			}
+		}
 
-        uint256 requested = _sumAllocations(allocations);
-        uint256 available = _availableWeight(st);
-        if (requested == 0 || requested > available) revert BadWeight();
+		uint256 requested = _sumAllocations(allocations);
+		uint256 available = _availableWeight(st);
+		if (requested == 0 || requested > available) revert BadWeight();
 
 		VoteRecord storage vr = s.votes[voter];
 		// If already confirmed, remove old totals first
@@ -440,9 +449,9 @@ contract VotingHub {
 			emit VotePrepared(sessionId, voter, anonId, requested);
 		}
 
-        if (isAnon) {
-            s.anonVotes[anonId] = AnonMeta({status: vr.status, usedWeight: requested});
-        }
+		if (isAnon) {
+			s.anonVotes[anonId] = AnonMeta({status: vr.status, usedWeight: requested});
+		}
 	}
 
 	function _storeAllocations(VoteRecord storage vr, Allocation[] memory allocations) internal {
