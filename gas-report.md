@@ -13,3 +13,17 @@ Baseline measurements from `scripts/gasProbe.ts` on Hardhat local network (Node 
 - purchaseWeight: 84,537 gas
 - castAnonymousVote: 376,147 gas
 - revealResults: 32,527 gas
+
+Optimized (custom errors + lighter anon storage):
+
+- createSession: 435,566 gas
+- castVote (finalize=true): 199,078 gas
+- castVote (update): 102,987 gas
+- castVote (prepare only): 58,840 gas
+- confirmVote: 71,147 gas
+- revokeVote: 50,482 gas
+- delegateVote: 86,394 gas
+- castVote (delegated weight): 158,945 gas
+- purchaseWeight: 84,513 gas
+- castAnonymousVote: 286,636 gas
+- revealResults: 32,498 gas

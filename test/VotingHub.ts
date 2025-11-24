@@ -118,8 +118,9 @@ describe("VotingHub", () => {
     const sessionId = await createSession({ revealTime: now + 1000n });
     await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
 
-    await expect(hub.connect(voterA).getOptionTotals(sessionId)).to.be.revertedWith(
-      "Hidden",
+    await expect(hub.connect(voterA).getOptionTotals(sessionId)).to.be.revertedWithCustomError(
+      hub,
+      "NotAuthorized",
     );
 
     const totalsViewer = await hub.connect(viewer).getOptionTotals(sessionId);
