@@ -82,4 +82,21 @@ interface VotingHubInterface {
 		view
 		returns (VoteStatus status, Allocation[] memory allocations, bool anonymousVote, bytes32 anonId, uint256 usedWeight);
 	function canSeeResults(uint256 sessionId, address viewer) external view returns (bool);
+	function getSessionMeta(uint256 sessionId)
+		external
+		view
+		returns (
+			string memory name,
+			uint256 startTime,
+			uint256 endTime,
+			uint256 revealTime,
+			Algorithm algorithm,
+			bool allowAnonymous,
+			bool allowMultiVoteWithEth,
+			bool concealResults,
+			bool revealed,
+			uint256 optionCount,
+			uint256 pricePerWeight
+		);
+	function listSessions() external view returns (uint256[] memory ids);
 }

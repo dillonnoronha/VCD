@@ -69,6 +69,8 @@ contract CoreFacet is VotingErrors {
 			}
 		}
 
+		ds.sessionIds.push(id);
+
 		emit SessionCreated(id, name, startTime, endTime);
 	}
 
@@ -191,6 +193,41 @@ contract CoreFacet is VotingErrors {
 	function canSeeResults(uint256 sessionId, address viewer) external view returns (bool) {
 		Session storage s = _session(sessionId);
 		return _canSeeResults(s, viewer);
+	}
+
+	function getSessionMeta(uint256 sessionId)
+		external
+		view
+		returns (
+			string memory name,
+			uint256 startTime,
+			uint256 endTime,
+			uint256 revealTime,
+			Algorithm algorithm,
+			bool allowAnonymous,
+			bool allowMultiVoteWithEth,
+			bool concealResults,
+			bool revealed,
+			uint256 optionCount,
+			uint256 pricePerWeight
+		)
+	{
+		Session storage s = _session(sessionId);
+		name = s.name;
+		startTime = s.startTime;
+		endTime = s.endTime;
+		revealTime = s.revealTime;
+		algorithm = s.algorithm;
+		allowAnonymous = s.allowAnonymous;
+		allowMultiVoteWithEth = s.allowMultiVoteWithEth;
+		concealResults = s.concealResults;
+		revealed = s.revealed;
+		optionCount = s.options.length;
+		pricePerWeight = s.pricePerWeight;
+	}
+
+	function listSessions() external view returns (uint256[] memory ids) {
+		ids = VotingStorage.layout().sessionIds;
 	}
 
 	// internal helpers

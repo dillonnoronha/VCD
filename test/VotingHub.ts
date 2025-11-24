@@ -95,6 +95,8 @@ describe("VotingHub", () => {
 			{ sig: "getOptions(uint256)", impl: core },
 			{ sig: "getVoteAllocations(uint256,address)", impl: core },
 			{ sig: "canSeeResults(uint256,address)", impl: core },
+			{ sig: "getSessionMeta(uint256)", impl: core },
+			{ sig: "listSessions()", impl: core },
 			{ sig: "delegateVote(uint256,address)", impl: delegation },
 			{ sig: "purchaseWeight(uint256)", impl: purchase },
 			{ sig: "setAuthorizedViewer(uint256,address,bool)", impl: reveal },
@@ -125,6 +127,15 @@ describe("VotingHub", () => {
 		expect(opts.length).to.equal(2);
 		expect(opts[0].name).to.equal("A");
 		expect(opts[1].weight).to.equal(1n);
+
+		const ids = await hub.listSessions();
+		expect(ids.length).to.equal(1);
+		expect(ids[0]).to.equal(sessionId);
+
+		const meta = await hub.getSessionMeta(sessionId);
+		expect(meta.name).to.equal("Session");
+		expect(meta.optionCount).to.equal(2n);
+		expect(meta.concealResults).to.equal(true);
 	});
 
 	it("casts and updates a vote", async () => {
