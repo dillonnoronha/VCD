@@ -637,4 +637,42 @@ describe("VotingHub", () => {
 		);
 		await hub.clearStrategy(1);
 	});
+
+	it("simulates 100 voters over randomized intervals with biased outcomes", async () => {
+		const sessionId = await createSession({
+			optionNames: ["X", "Y"],
+			optionWeights: [1n, 1n],
+			startTime: BigInt((await ethers.provider.getBlock("latest"))!.timestamp) - 10n,
+			endTime: BigInt((await ethers.provider.getBlock("latest"))!.timestamp) + 10_000n,
+			concealResults: false,
+		});
+
+		const voters = await ethers.getSigners();
+		let seed = 12345;
+		const rand = () => {
+			seed = (seed * 1103515245 + 12345) % 0x100000000;
+			return seed;
+		};
+
+		const target = 100;
+
+		for (let i = 0; i < target; i++) {
+			const voter = voters[(i % (voters.length - 1)) + 1];
+			await hub.connect(owner).setVoterWeight(sessionId, voter.address, 5n);
+		}
+
+		const txs: any[] = [];
+		for (let i = 0; i < target; i++) {
+			const voter = voters[(i % (voters.length - 1)) + 1];
+			const choice = rand() % 100 < 70 ? 0n : 1n;
+			const weight = BigInt((rand() % 3) + 1);
+			txs.push(hub.connect(voter).castVote(sessionId, [{ optionId: choice, weight }], true));
+		}
+
+		await Promise.all(txs);
+
+		const totals = await hub.getOptionTotals(sessionId);
+		expect(totals[0]).to.be.gt(totals[1]);
+		expect(Number(totals[0])).to.be.greaterThan(Number(totals[1]) * 1.1);
+	});
 });

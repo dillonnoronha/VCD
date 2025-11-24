@@ -1,65 +1,72 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
+import { ethers } from "hardhat";
 
-const selectors = [
-	"0x45c69d02", // createSession
-	"0x26746ed6", // castVote
-	"0xbfe9e64d", // castAnonymousVote
-	"0xaa457faf", // confirmVote
-	"0xf73a8b4a", // revokeVote
-	"0x9503904c", // updateVote
-	"0x642f123f", // getOptionTotals
-	"0x6b1426a4", // getWinners
-	"0x8915b3fb", // getOptions
-	"0xde3cc9c5", // getVoteAllocations
-	"0x8e1a7ec8", // canSeeResults
-	"0xac71fe18", // delegateVote
-	"0x05c24816", // purchaseWeight
-	"0xee0c3a52", // setAuthorizedViewer
-	"0xb8f6255a", // revealResults
-	"0xf386461f", // emitSessionEnd
-	"0x25cd5dd8", // setStrategy
-	"0x516a98a6", // clearStrategy
-	"0x8da5cb5b", // owner
-	"0xf2fde38b", // transferOwnership
-	"0xef4957d1", // setVoterWeight
-	"0x49bbf7da", // nextSessionId
+const SIGS = [
+	"createSession(string,string[],uint256[],uint256,uint256,uint256,uint8,bool,bool,bool,address[],uint256)",
+	"castVote(uint256,(uint256,uint256)[],bool)",
+	"castAnonymousVote(uint256,bytes32,(uint256,uint256)[],bool)",
+	"confirmVote(uint256)",
+	"revokeVote(uint256)",
+	"updateVote(uint256,(uint256,uint256)[],bool)",
+	"getOptionTotals(uint256)",
+	"getWinners(uint256)",
+	"getOptions(uint256)",
+	"getVoteAllocations(uint256,address)",
+	"canSeeResults(uint256,address)",
+	"delegateVote(uint256,address)",
+	"purchaseWeight(uint256)",
+	"setAuthorizedViewer(uint256,address,bool)",
+	"revealResults(uint256)",
+	"emitSessionEnd(uint256)",
+	"setStrategy(uint8,address)",
+	"clearStrategy(uint8)",
+	"owner()",
+	"transferOwnership(address)",
+	"setVoterWeight(uint256,address,uint256)",
+	"nextSessionId()",
 ];
 
+const facetMap: Record<string, string> = {
+	"createSession(string,string[],uint256[],uint256,uint256,uint256,uint8,bool,bool,bool,address[],uint256)": "CoreFacet",
+	"castVote(uint256,(uint256,uint256)[],bool)": "CoreFacet",
+	"castAnonymousVote(uint256,bytes32,(uint256,uint256)[],bool)": "CoreFacet",
+	"confirmVote(uint256)": "CoreFacet",
+	"revokeVote(uint256)": "CoreFacet",
+	"updateVote(uint256,(uint256,uint256)[],bool)": "CoreFacet",
+	"getOptionTotals(uint256)": "CoreFacet",
+	"getWinners(uint256)": "CoreFacet",
+	"getOptions(uint256)": "CoreFacet",
+	"getVoteAllocations(uint256,address)": "CoreFacet",
+	"canSeeResults(uint256,address)": "CoreFacet",
+	"delegateVote(uint256,address)": "DelegationFacet",
+	"purchaseWeight(uint256)": "PurchaseFacet",
+	"setAuthorizedViewer(uint256,address,bool)": "RevealFacet",
+	"revealResults(uint256)": "RevealFacet",
+	"emitSessionEnd(uint256)": "RevealFacet",
+	"setStrategy(uint8,address)": "StrategyFacet",
+	"clearStrategy(uint8)": "StrategyFacet",
+	"owner()": "AdminFacet",
+	"transferOwnership(address)": "AdminFacet",
+	"setVoterWeight(uint256,address,uint256)": "AdminFacet",
+	"nextSessionId()": "AdminFacet",
+};
+
 export default buildModule("VotingDiamondModule", (m) => {
-	const core = m.contract("CoreFacet");
-	const delegation = m.contract("DelegationFacet");
-	const purchase = m.contract("PurchaseFacet");
-	const reveal = m.contract("RevealFacet");
-	const strategyFacet = m.contract("StrategyFacet");
-	const admin = m.contract("AdminFacet");
+	const deployedFacets: Record<string, any> = {};
+	const diamondArgsSelectors: string[] = [];
+	const diamondArgsImpls: any[] = [];
+
+	for (const sig of SIGS) {
+		const facetName = facetMap[sig];
+		if (!deployedFacets[facetName]) {
+			deployedFacets[facetName] = m.contract(facetName);
+		}
+		diamondArgsSelectors.push(ethers.dataSlice(ethers.id(sig), 0, 4));
+		diamondArgsImpls.push(deployedFacets[facetName]);
+	}
+
 	const weighted = m.contract("WeightedSplitStrategy");
-
-	const impls = [
-		core,
-		core,
-		core,
-		core,
-		core,
-		core,
-		core,
-		core,
-		core,
-		core,
-		core,
-		delegation,
-		purchase,
-		reveal,
-		reveal,
-		reveal,
-		strategyFacet,
-		strategyFacet,
-		admin,
-		admin,
-		admin,
-		admin,
-	];
-
-	const diamond = m.contract("VotingDiamond", [selectors, impls, m.getAccount(0)]);
+	const diamond = m.contract("VotingDiamond", [diamondArgsSelectors, diamondArgsImpls, m.getAccount(0)]);
 
 	const strategyAtDiamond = m.contractAt("StrategyFacet", diamond);
 	for (const alg of [0, 1, 2]) {
