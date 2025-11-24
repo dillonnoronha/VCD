@@ -25,29 +25,29 @@ contract VotingHub {
 	error AlreadyVoted();
 	error DelegationLoop();
 	error NoWeight();
-    error ValueTooLow();
-    error PriceUnset();
-    error PurchasesOff();
-    error NothingPending();
-    error NoVote();
-    error NoConfirmedVote();
-    error Reentrancy();
+	error ValueTooLow();
+	error PriceUnset();
+	error PurchasesOff();
+	error NothingPending();
+	error NoVote();
+	error NoConfirmedVote();
+	error Reentrancy();
 
 	// --- Ownership ---
-    address public owner;
-    uint256 private unlocked = 1;
+	address public owner;
+	uint256 private unlocked = 1;
 
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
-    }
+	modifier onlyOwner() {
+		if (msg.sender != owner) revert NotOwner();
+		_;
+	}
 
-    modifier nonReentrant() {
-        if (unlocked == 0) revert Reentrancy();
-        unlocked = 0;
-        _;
-        unlocked = 1;
-    }
+	modifier nonReentrant() {
+		if (unlocked == 0) revert Reentrancy();
+		unlocked = 0;
+		_;
+		unlocked = 1;
+	}
 
 	constructor() {
 		owner = msg.sender;
@@ -314,12 +314,12 @@ contract VotingHub {
 		emit VoteDelegated(sessionId, msg.sender, to, transferable);
 	}
 
-    function purchaseWeight(uint256 sessionId) external payable nonReentrant {
-        Session storage s = _session(sessionId);
-        if (!_isActive(s)) revert Inactive();
-        if (!s.allowMultiVoteWithEth) revert PurchasesOff();
-        if (s.pricePerWeight == 0) revert PriceUnset();
-        uint256 units = msg.value / s.pricePerWeight;
+	function purchaseWeight(uint256 sessionId) external payable nonReentrant {
+		Session storage s = _session(sessionId);
+		if (!_isActive(s)) revert Inactive();
+		if (!s.allowMultiVoteWithEth) revert PurchasesOff();
+		if (s.pricePerWeight == 0) revert PriceUnset();
+		uint256 units = msg.value / s.pricePerWeight;
 		if (units == 0) revert ValueTooLow();
 
 		VoterState storage st = _ensureState(s, msg.sender);

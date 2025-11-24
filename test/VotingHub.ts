@@ -3,7 +3,7 @@ import { network } from "hardhat";
 
 const { ethers } = await network.connect();
 
-type Allocation = { optionId: bigint; weight: bigint };
+// type Allocation = { optionId: bigint; weight: bigint };
 
 describe("VotingHub", () => {
 	const pricePerWeight = ethers.parseEther("0.001");
@@ -204,5 +204,82 @@ describe("VotingHub", () => {
 		await expect(
 			hub.connect(voterB).delegateVote(sessionId, voterA.address),
 		).to.be.revertedWithCustomError(hub, "DelegationLoop");
+	});
+
+	it("rejects bad session creation and owner-only setters", async () => {
+		const block = await ethers.provider.getBlock("latest");
+		const now = BigInt(block!.timestamp);
+
+		await expect(
+			hub.createSession("bad", ["A"], [1n, 2n], now, now + 10n, now + 20n, 0, true, true, true, [viewer.address], pricePerWeight),
+		).to.be.revertedWithCustomError(hub, "OptionMismatch");
+
+		await expect(
+			hub.createSession("bad", ["A"], [1n], now + 20n, now + 10n, now + 30n, 0, true, true, true, [viewer.address], pricePerWeight),
+		).to.be.revertedWithCustomError(hub, "InvalidWindow");
+
+		const sessionId = await createSession();
+		await expect(
+			hub.connect(voterA).setVoterWeight(sessionId, voterA.address, 2n),
+		).to.be.revertedWithCustomError(hub, "NotOwner");
+		await expect(
+			hub.connect(voterA).setAuthorizedViewer(sessionId, voterA.address, true),
+		).to.be.revertedWithCustomError(hub, "NotOwner");
+	});
+
+	it("blocks confirm without prepare and double confirm", async () => {
+		const sessionId = await createSession();
+		await expect(hub.connect(voterA).confirmVote(sessionId)).to.be.revertedWithCustomError(
+			hub,
+			"NothingPending",
+		);
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], false);
+		await hub.connect(voterA).confirmVote(sessionId);
+		await expect(hub.connect(voterA).confirmVote(sessionId)).to.be.revertedWithCustomError(
+			hub,
+			"NothingPending",
+		);
+	});
+
+	it("blocks unauthorized reveal and emits session end after time", async () => {
+		const block = await ethers.provider.getBlock("latest");
+		const now = BigInt(block!.timestamp);
+		const sessionId = await createSession({ revealTime: now + 1000n });
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
+
+		await expect(hub.connect(voterA).revealResults(sessionId)).to.be.revertedWithCustomError(
+			hub,
+			"NotAuthorized",
+		);
+
+		await advanceTime(4000);
+		await expect(hub.emitSessionEnd(sessionId)).to.emit(hub, "SessionEnded");
+	});
+
+	it("processes refund on purchase when value not multiple of pricePerWeight", async () => {
+		const sessionId = await createSession({ pricePerWeight: ethers.parseEther("0.01") });
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
+
+		const before = await ethers.provider.getBalance(voterA.address);
+		const tx = await hub.connect(voterA).purchaseWeight(sessionId, { value: ethers.parseEther("0.015") });
+		const receipt = await tx.wait();
+		const gasCost = receipt!.gasUsed * receipt!.gasPrice!;
+		const after = await ethers.provider.getBalance(voterA.address);
+
+		expect(before - after - gasCost).to.equal(ethers.parseEther("0.01"));
+	});
+
+	it("rejects voting outside of active window", async () => {
+		const block = await ethers.provider.getBlock("latest");
+		const now = BigInt(block!.timestamp);
+		const sessionId = await createSession({ startTime: now + 5000n, endTime: now + 6000n });
+		await expect(
+			hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true),
+		).to.be.revertedWithCustomError(hub, "Inactive");
+
+		await advanceTime(6000);
+		await expect(
+			hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true),
+		).to.be.revertedWithCustomError(hub, "Inactive");
 	});
 });

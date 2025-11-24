@@ -41,3 +41,9 @@ Current (with reentrancy guard on purchases):
 - purchaseWeight: 86,843 gas
 - castAnonymousVote: 286,636 gas
 - revealResults: 32,498 gas
+
+Notes:
+- Measurements are approximate and specific to the probed sequence; different allocations and branch choices will vary.
+- Anonymous voting remains the heaviest due to alias metadata and allocations.
+- Optimizer + `viaIR` enabled in `hardhat.config.ts`.
+- Hardhat coverage (test --coverage) currently ~90.8% line / 81.3% statement for `VotingHub.sol`; remaining uncovered paths are minor visibility/payment edges.
