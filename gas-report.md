@@ -1,0 +1,15 @@
+# Gas Probe Results
+
+Baseline measurements from `scripts/gasProbe.ts` on Hardhat local network (Node 22.21.1, solidity 0.8.28, optimizer+viaIR):
+
+- createSession: 435,590 gas
+- castVote (finalize=true): 199,112 gas
+- castVote (update): 103,021 gas
+- castVote (prepare only): 58,866 gas
+- confirmVote: 71,171 gas
+- revokeVote: 50,501 gas
+- delegateVote: 86,418 gas
+- castVote (delegated weight): 158,979 gas
+- purchaseWeight: 84,537 gas
+- castAnonymousVote: 376,147 gas
+- revealResults: 32,527 gas
