@@ -282,4 +282,79 @@ describe("VotingHub", () => {
 			hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true),
 		).to.be.revertedWithCustomError(hub, "Inactive");
 	});
+
+	it("handles ownership transfer rules", async () => {
+		await expect(hub.transferOwnership(ethers.ZeroAddress)).to.be.revertedWith("Zero owner");
+		await hub.transferOwnership(viewer.address);
+		expect(await hub.owner()).to.equal(viewer.address);
+		await expect(hub.transferOwnership(voterA.address)).to.be.revertedWithCustomError(
+			hub,
+			"NotOwner",
+		);
+	});
+
+	it("exposes vote allocations to authorized viewers only", async () => {
+		const sessionId = await createSession();
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], false);
+		await expect(
+			hub.connect(voterB).getVoteAllocations(sessionId, voterA.address),
+		).to.be.revertedWithCustomError(hub, "NotAuthorized");
+
+		await hub.setAuthorizedViewer(sessionId, voterB.address, true);
+		const res = await hub.connect(voterB).getVoteAllocations(sessionId, voterA.address);
+		expect(res.usedWeight).to.equal(1n);
+	});
+
+	it("reveals results automatically after end time even if concealed", async () => {
+		const block = await ethers.provider.getBlock("latest");
+		const now = BigInt(block!.timestamp);
+		const sessionId = await createSession({
+			startTime: now - 10n,
+			endTime: now + 10n,
+			revealTime: now + 10_000n,
+		});
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
+
+		await expect(
+			hub.connect(voterA).getOptionTotals(sessionId),
+		).to.be.revertedWithCustomError(hub, "NotAuthorized");
+
+		await advanceTime(20);
+		const totals = await hub.connect(voterA).getOptionTotals(sessionId);
+		expect(totals[0]).to.equal(1n);
+	});
+
+	it("allows public visibility when concealResults is false", async () => {
+		const sessionId = await createSession({ concealResults: false });
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 1n, weight: 1n }], true);
+		const totals = await hub.connect(voterC).getOptionTotals(sessionId);
+		expect(totals[1]).to.equal(1n);
+	});
+
+	it("enforces price configuration and value thresholds when purchasing weight", async () => {
+		const sessionId = await createSession({ pricePerWeight: 0n });
+		await expect(
+			hub.connect(voterA).purchaseWeight(sessionId, { value: pricePerWeight }),
+		).to.be.revertedWithCustomError(hub, "PriceUnset");
+
+		const sessionId2 = await createSession({ pricePerWeight: ethers.parseEther("0.01") });
+		await expect(
+			hub.connect(voterA).purchaseWeight(sessionId2, { value: ethers.parseEther("0.001") }),
+		).to.be.revertedWithCustomError(hub, "ValueTooLow");
+	});
+
+	it("emits reveal results and exposes canSeeResults helper", async () => {
+		const sessionId = await createSession();
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
+		await expect(hub.revealResults(sessionId)).to.emit(hub, "ResultsRevealed");
+		expect(await hub.canSeeResults(sessionId, voterB.address)).to.equal(true);
+	});
+
+	it("updates votes via updateVote entry", async () => {
+		const sessionId = await createSession();
+		await hub.connect(voterA).updateVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
+		await hub.connect(voterA).updateVote(sessionId, [{ optionId: 1n, weight: 1n }], true);
+		const totals = await hub.connect(viewer).getOptionTotals(sessionId);
+		expect(totals[1]).to.equal(1n);
+	});
 });
