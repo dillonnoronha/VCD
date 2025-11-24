@@ -137,6 +137,10 @@ contract VotingHub is VotingErrors {
 		strategies[algorithm] = strategy;
 	}
 
+	function clearStrategy(Algorithm algorithm) external onlyOwner {
+		delete strategies[algorithm];
+	}
+
 	function setVoterWeight(uint256 sessionId, address voter, uint256 weight) external onlyOwner {
 		Session storage s = _session(sessionId);
 		VoterState storage st = _ensureState(s, voter);

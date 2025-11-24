@@ -371,4 +371,195 @@ describe("VotingHub", () => {
 		const totals = await hub.connect(viewer).getOptionTotals(sessionId);
 		expect(totals[1]).to.equal(1n);
 	});
+
+	it("hits error branches for session creation and authorization", async () => {
+		const block = await ethers.provider.getBlock("latest");
+		const now = BigInt(block!.timestamp);
+		await expect(
+			hub.createSession(
+				"none",
+				[],
+				[],
+				now,
+				now + 10n,
+				now + 10n,
+				0,
+				true,
+				true,
+				true,
+				[viewer.address],
+				pricePerWeight,
+			),
+		).to.be.revertedWithCustomError(hub, "OptionsRequired");
+
+		const sessionId = await createSession();
+		await hub.setAuthorizedViewer(sessionId, viewer.address, true); // no-op return path
+		await expect(hub.connect(voterA).revealResults(sessionId)).to.be.revertedWithCustomError(
+			hub,
+			"NotAuthorized",
+		);
+		const publicSession = await createSession({ concealResults: false });
+		await expect(hub.revealResults(publicSession)).to.be.revertedWithCustomError(
+			hub,
+			"AlreadyPublic",
+		);
+	});
+
+	it("covers anon errors and inactive confirm/revoke", async () => {
+		const block = await ethers.provider.getBlock("latest");
+		const now = BigInt(block!.timestamp);
+		const anonOff = await createSession({ allowAnonymous: false });
+		await expect(
+			hub.connect(voterA).castAnonymousVote(anonOff, ethers.keccak256(ethers.toUtf8Bytes("x")), [{ optionId: 0n, weight: 1n }], true),
+		).to.be.revertedWithCustomError(hub, "AnonDisabled");
+		const anonZero = await createSession({ allowAnonymous: true });
+		await expect(
+			hub.connect(voterA).castAnonymousVote(anonZero, ethers.ZeroHash, [{ optionId: 0n, weight: 1n }], true),
+		).to.be.revertedWithCustomError(hub, "AnonIdRequired");
+
+		const futureSession = await createSession({ startTime: now + 5000n, endTime: now + 6000n });
+		await expect(hub.connect(voterA).confirmVote(futureSession)).to.be.revertedWithCustomError(
+			hub,
+			"Inactive",
+		);
+
+		const endedSession = await createSession({ startTime: now - 1000n, endTime: now - 10n });
+		await expect(hub.connect(voterA).revokeVote(endedSession)).to.be.revertedWithCustomError(
+			hub,
+			"Inactive",
+		);
+		const noVoteSession = await createSession();
+		await expect(hub.connect(voterA).revokeVote(noVoteSession)).to.be.revertedWithCustomError(
+			hub,
+			"NoVote",
+		);
+	});
+
+	it("covers delegation edge cases", async () => {
+		const sessionId = await createSession();
+		await expect(hub.connect(voterA).delegateVote(sessionId, voterA.address)).to.be.revertedWithCustomError(
+			hub,
+			"SelfDelegation",
+		);
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
+		await expect(hub.connect(voterA).delegateVote(sessionId, voterB.address)).to.be.revertedWithCustomError(
+			hub,
+			"AlreadyVoted",
+		);
+
+		const zeroWeightSession = await createSession();
+		await hub.connect(owner).setVoterWeight(zeroWeightSession, voterC.address, 0n);
+		await expect(
+			hub.connect(voterC).delegateVote(zeroWeightSession, voterB.address),
+		).to.be.revertedWithCustomError(hub, "NoWeight");
+	});
+
+	it("covers purchase restrictions and reentrancy", async () => {
+		const block = await ethers.provider.getBlock("latest");
+		const now = BigInt(block!.timestamp);
+		const purchasesOff = await createSession({ allowMultiVoteWithEth: false });
+		await expect(
+			hub.connect(voterA).purchaseWeight(purchasesOff, { value: pricePerWeight }),
+		).to.be.revertedWithCustomError(hub, "PurchasesOff");
+
+		const ended = await createSession({ startTime: now - 1000n, endTime: now - 10n });
+		await expect(
+			hub.connect(voterA).purchaseWeight(ended, { value: pricePerWeight }),
+		).to.be.revertedWithCustomError(hub, "Inactive");
+
+		const active = await createSession({ pricePerWeight: ethers.parseEther("0.01") });
+		const Attacker = await ethers.getContractFactory("ReenterPurchaser", owner);
+		const attacker = await Attacker.deploy(await hub.getAddress(), active);
+		await expect(
+			attacker.connect(owner).attack({ value: ethers.parseEther("0.015") }),
+		).to.be.revertedWith("Refund failed");
+	});
+
+	it("covers emitSessionEnd double call and missing session guard", async () => {
+		const block = await ethers.provider.getBlock("latest");
+		const now = BigInt(block!.timestamp);
+		const sessionId = await createSession({ startTime: now - 100n, endTime: now - 10n });
+		await hub.emitSessionEnd(sessionId);
+		await expect(hub.emitSessionEnd(sessionId)).to.be.revertedWithCustomError(hub, "AlreadyEmitted");
+		await expect(hub.getOptions(9999)).to.be.revertedWith("Session missing");
+	});
+
+	it("covers inactive emitSessionEnd and delegate reverts", async () => {
+		const block = await ethers.provider.getBlock("latest");
+		const now = BigInt(block!.timestamp);
+		const sessionId = await createSession({ startTime: now + 1000n, endTime: now + 2000n });
+		await expect(hub.emitSessionEnd(sessionId)).to.be.revertedWithCustomError(hub, "Inactive");
+		await expect(
+			hub.connect(voterA).delegateVote(sessionId, voterB.address),
+		).to.be.revertedWithCustomError(hub, "Inactive");
+	});
+
+	it("covers delegation already delegated and to confirmed voter paths", async () => {
+		const sessionId = await createSession();
+		await hub.connect(voterA).delegateVote(sessionId, voterB.address);
+		await expect(
+			hub.connect(voterA).delegateVote(sessionId, voterC.address),
+		).to.be.revertedWithCustomError(hub, "Delegated");
+
+		const sessionId2 = await createSession();
+		await hub.connect(voterB).castVote(sessionId2, [{ optionId: 0n, weight: 1n }], true);
+		await hub.connect(voterA).delegateVote(sessionId2, voterB.address);
+		const totals = await hub.connect(viewer).getOptionTotals(sessionId2);
+		expect(totals[0]).to.equal(2n);
+	});
+
+	it("covers bad option and missing strategy errors", async () => {
+		const sessionId = await createSession();
+		await expect(
+			hub.connect(voterA).castVote(sessionId, [{ optionId: 99n, weight: 1n }], true),
+		).to.be.revertedWithCustomError(hub, "BadOption");
+
+		const sessionId2 = await createSession({ algorithm: 2 });
+		await hub.clearStrategy(2);
+		await expect(
+			hub.connect(voterA).castVote(sessionId2, [{ optionId: 0n, weight: 1n }], true),
+		).to.be.revertedWithCustomError(hub, "StrategyNotSet");
+	});
+
+	it("covers bad weight and NoConfirmedVote defensive path", async () => {
+		const sessionId = await createSession();
+		await expect(
+			hub.connect(voterA).castVote(sessionId, [], true),
+		).to.be.revertedWithCustomError(hub, "BadWeight");
+
+		const Harness = await ethers.getContractFactory("VotingHubHarness", owner);
+		const harness = await Harness.deploy();
+		const block = await ethers.provider.getBlock("latest");
+		const now = BigInt(block!.timestamp);
+		const harnessSession = await harness.nextSessionId();
+		await harness.createSession(
+			"harness",
+			["A"],
+			[1n],
+			now - 10n,
+			now + 100n,
+			now + 1000n,
+			0,
+			true,
+			true,
+			true,
+			[viewer.address],
+			pricePerWeight,
+		);
+		await harness.connect(voterA).castVote(harnessSession, [{ optionId: 0n, weight: 1n }], false);
+		await expect(
+			harness.connect(voterA).exposeDistribute(harnessSession, 1n),
+		).to.be.revertedWithCustomError(harness, "NoConfirmedVote");
+
+		await harness.connect(voterA).castVote(harnessSession, [{ optionId: 0n, weight: 1n }], true);
+		await harness.connect(voterA).exposeDistribute(harnessSession, 0n);
+	});
+
+	it("blocks unauthorized getWinners when concealed", async () => {
+		const sessionId = await createSession();
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
+		await expect(
+			hub.connect(voterA).getWinners(sessionId),
+		).to.be.revertedWithCustomError(hub, "NotAuthorized");
+	});
 });
