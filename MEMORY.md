@@ -43,3 +43,5 @@
 - Do not use `--gas-stats` with EDR unless acceptable to crash after stats.
 - Contract size: facets and diamond are small; monolith removed.
 
+## Past sessions
+- codex resume 019ab37d-911d-7cd0-8e62-5f597f42f393
