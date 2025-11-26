@@ -1,0 +1,35 @@
+# Node modules
+/node_modules
+/_old_
+
+# Compilation output
+/dist
+/artifacts
+/cache
+/types
+/coverage
+/build
+
+# Hardhat generated configs and env
+/.env
+/.env.local
+.DS_Store
+.idea/
+.vscode/
+
+# Ignition deployments
+/ignition/deployments
+
+# pnpm deploy output
+/bundle
+
+# OS/editor noise
+Thumbs.db
+*.log
+.nyc_output/
+
+# Local docs/reports
+/gas-report.md
+/SECURITY.md
+/mise.toml
+/MEMORY.md
