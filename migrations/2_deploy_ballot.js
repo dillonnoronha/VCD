@@ -1,11 +1,9 @@
 const Ballot = artifacts.require("Ballot");
 
 module.exports = async function (deployer) {
-  const proposalNames = [
-    web3.utils.asciiToHex("Alice"),
-    web3.utils.asciiToHex("Bob"),
-    web3.utils.asciiToHex("Charlie"),
-  ];
+  const proposals = ["Red", "Blue", "Green"].map(p =>
+    web3.utils.asciiToHex(p)
+  );
 
-  await deployer.deploy(Ballot, proposalNames);
+  await deployer.deploy(Ballot, proposals);
 };
