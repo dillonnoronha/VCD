@@ -5,5 +5,7 @@ module.exports = async function (deployer) {
     web3.utils.asciiToHex(p)
   );
 
-  await deployer.deploy(Ballot, proposals);
+  const duration = 300;
+
+  await deployer.deploy(Ballot, proposals, duration);
 };
