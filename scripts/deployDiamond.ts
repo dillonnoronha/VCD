@@ -1,8 +1,11 @@
-import { ethers } from "hardhat";
+import hre from "hardhat";
+import ethers from "hardhat";
 
 async function main() {
-	const [deployer] = await ethers.getSigners();
-	console.log("Deploying with", deployer.address);
+	// const { ethers } = hre;
+	const [defaultDeployer] = await ethers.getSigners();
+	const owner = process.env.OWNER_ADDRESS ?? defaultDeployer.address;
+	console.log("Deploying with", defaultDeployer.address, "owner:", owner);
 
 	const Core = await ethers.getContractFactory("CoreFacet");
 	const Delegation = await ethers.getContractFactory("DelegationFacet");
@@ -50,7 +53,7 @@ async function main() {
 
 	const selectorBytes = selectorDefs.map((d) => ethers.dataSlice(ethers.id(d.sig), 0, 4));
 	const implAddrs = await Promise.all(selectorDefs.map(async (d) => d.impl.getAddress()));
-	const diamond = await Diamond.deploy(selectorBytes, implAddrs, deployer.address);
+	const diamond = await Diamond.deploy(selectorBytes, implAddrs, owner);
 	console.log("Diamond deployed at", await diamond.getAddress());
 
 	const hub = await ethers.getContractAt("VotingHubInterface", await diamond.getAddress());
@@ -63,5 +66,5 @@ async function main() {
 
 main().catch((err) => {
 	console.error(err);
-	process.exit(1);
+	process.exitCode = 1;
 });

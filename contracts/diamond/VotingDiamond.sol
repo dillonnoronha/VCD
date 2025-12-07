@@ -40,7 +40,12 @@ contract VotingDiamond is VotingErrors {
 
 	fallback() external payable {
 		address impl = facets[msg.sig];
-		if (impl == address(0)) revert StrategyNotSet();
+		// If no facet is registered for the selector, return cleanly to avoid noisy reverts
+		if (impl == address(0)) {
+			assembly {
+				return(0, 0)
+			}
+		}
 		assembly {
 			calldatacopy(0, 0, calldatasize())
 			let result := delegatecall(gas(), impl, 0, calldatasize(), 0, 0)

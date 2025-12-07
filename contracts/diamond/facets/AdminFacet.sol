@@ -5,21 +5,17 @@ import {VotingStorage} from "../lib/VotingStorage.sol";
 import {VotingErrors} from "../../voting/Errors.sol";
 import {Session, VoterState} from "../../voting/Types.sol";
 
-contract AdminFacet is VotingErrors {
-	using VotingStorage for VotingStorage.Layout;
+	contract AdminFacet is VotingErrors {
+		using VotingStorage for VotingStorage.Layout;
 
-	modifier onlyOwner() {
-		if (msg.sender != VotingStorage.layout().owner) revert NotOwner();
-		_;
-	}
+		modifier onlyOwner() {
+			if (msg.sender != VotingStorage.layout().owner) revert NotOwner();
+			_;
+		}
 
-	function owner() external view returns (address) {
-		return VotingStorage.layout().owner;
-	}
-
-	function nextSessionId() external view returns (uint256) {
-		return VotingStorage.layout().nextSessionId;
-	}
+		function nextSessionId() external view returns (uint256) {
+			return VotingStorage.layout().nextSessionId;
+		}
 
 	function transferOwnership(address newOwner) external onlyOwner {
 		if (newOwner == address(0)) revert ZeroOwner();
@@ -41,7 +37,7 @@ contract AdminFacet is VotingErrors {
 		VoterState storage st = s.voterStates[voter];
 		if (!st.exists) {
 			st.exists = true;
-			st.baseWeight = 1;
+			st.baseWeight = s.defaultBaseWeight == 0 ? 1 : s.defaultBaseWeight;
 		}
 		return st;
 	}

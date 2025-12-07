@@ -6,6 +6,7 @@ abstract contract VotingErrors {
 	error OptionsRequired();
 	error OptionMismatch();
 	error InvalidWindow();
+	error InvalidAlgorithm();
 	error Inactive();
 	error Delegated();
 	error BadOption();

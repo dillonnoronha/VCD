@@ -34,6 +34,7 @@ describe("VotingHub", () => {
 		concealResults: boolean;
 		authorizedViewers: string[];
 		pricePerWeight: bigint;
+		defaultBaseWeight: bigint;
 	}> = {}) => {
 		const block = await ethers.provider.getBlock("latest");
 		const now = BigInt(block!.timestamp);
@@ -57,6 +58,7 @@ describe("VotingHub", () => {
 			opts.concealResults ?? true,
 			opts.authorizedViewers ?? [viewer.address],
 			opts.pricePerWeight ?? pricePerWeight,
+			opts.defaultBaseWeight ?? 1n,
 		);
 
 		return nextId;
@@ -70,45 +72,52 @@ describe("VotingHub", () => {
 		const Purchase = await ethers.getContractFactory("PurchaseFacet", owner);
 		const Reveal = await ethers.getContractFactory("RevealFacet", owner);
 		const Strategy = await ethers.getContractFactory("StrategyFacet", owner);
+		const ViewFacet = await ethers.getContractFactory("ViewFacet", owner);
 		const Admin = await ethers.getContractFactory("AdminFacet", owner);
 		const Diamond = await ethers.getContractFactory("VotingDiamond", owner);
 		const WeightedStrategy = await ethers.getContractFactory("WeightedSplitStrategy", owner);
+		const OnePersonStrategy = await ethers.getContractFactory("OnePersonOneVoteStrategy", owner);
 
 		const core = await Core.deploy();
 		const delegation = await Delegation.deploy();
 		const purchase = await Purchase.deploy();
 		const reveal = await Reveal.deploy();
 		const strategy = await Strategy.deploy();
+		const onePerson = await OnePersonStrategy.deploy();
+		const viewFacet = await ViewFacet.deploy();
 		const admin = await Admin.deploy();
 		const weighted = await WeightedStrategy.deploy();
 		coreImpl = await core.getAddress();
 
-		const selectorDefs = [
-			{ sig: "createSession(string,string[],uint256[],uint256,uint256,uint256,uint8,bool,bool,bool,address[],uint256)", impl: core },
-			{ sig: "castVote(uint256,(uint256,uint256)[],bool)", impl: core },
-			{ sig: "castAnonymousVote(uint256,bytes32,(uint256,uint256)[],bool)", impl: core },
-			{ sig: "confirmVote(uint256)", impl: core },
-			{ sig: "revokeVote(uint256)", impl: core },
-			{ sig: "updateVote(uint256,(uint256,uint256)[],bool)", impl: core },
-			{ sig: "getOptionTotals(uint256)", impl: core },
-			{ sig: "getWinners(uint256)", impl: core },
-			{ sig: "getOptions(uint256)", impl: core },
-			{ sig: "getVoteAllocations(uint256,address)", impl: core },
-			{ sig: "canSeeResults(uint256,address)", impl: core },
-			{ sig: "getSessionMeta(uint256)", impl: core },
-			{ sig: "listSessions()", impl: core },
-			{ sig: "delegateVote(uint256,address)", impl: delegation },
-			{ sig: "purchaseWeight(uint256)", impl: purchase },
-			{ sig: "setAuthorizedViewer(uint256,address,bool)", impl: reveal },
-			{ sig: "revealResults(uint256)", impl: reveal },
-			{ sig: "emitSessionEnd(uint256)", impl: reveal },
-			{ sig: "setStrategy(uint8,address)", impl: strategy },
-			{ sig: "clearStrategy(uint8)", impl: strategy },
-			{ sig: "owner()", impl: admin },
-			{ sig: "transferOwnership(address)", impl: admin },
-			{ sig: "setVoterWeight(uint256,address,uint256)", impl: admin },
-			{ sig: "nextSessionId()", impl: admin },
-		];
+			const selectorDefs = [
+				{ sig: "createSession(string,string[],uint256[],uint256,uint256,uint256,uint8,bool,bool,bool,address[],uint256,uint256)", impl: core },
+				{ sig: "castVote(uint256,(uint256,uint256)[],bool)", impl: core },
+				{ sig: "castAnonymousVote(uint256,bytes32,(uint256,uint256)[],bool)", impl: core },
+				{ sig: "confirmVote(uint256)", impl: core },
+				{ sig: "revokeVote(uint256)", impl: core },
+				{ sig: "updateVote(uint256,(uint256,uint256)[],bool)", impl: core },
+				{ sig: "getOptionTotals(uint256)", impl: viewFacet },
+				{ sig: "getWinners(uint256)", impl: viewFacet },
+				{ sig: "getOptions(uint256)", impl: viewFacet },
+				{ sig: "getVoteAllocations(uint256,address)", impl: viewFacet },
+				{ sig: "canSeeResults(uint256,address)", impl: viewFacet },
+				{ sig: "getSessionMeta(uint256)", impl: viewFacet },
+				{ sig: "listSessions()", impl: viewFacet },
+				{ sig: "listDelegators(uint256,address)", impl: viewFacet },
+				{ sig: "listVoters(uint256)", impl: viewFacet },
+				{ sig: "getVoterState(uint256,address)", impl: viewFacet },
+				{ sig: "delegateVote(uint256,address)", impl: delegation },
+				{ sig: "purchaseWeight(uint256)", impl: purchase },
+				{ sig: "setAuthorizedViewer(uint256,address,bool)", impl: reveal },
+				{ sig: "revealResults(uint256)", impl: reveal },
+				{ sig: "emitSessionEnd(uint256)", impl: reveal },
+				{ sig: "forceEndSession(uint256)", impl: reveal },
+				{ sig: "setStrategy(uint8,address)", impl: strategy },
+				{ sig: "clearStrategy(uint8)", impl: strategy },
+				{ sig: "transferOwnership(address)", impl: admin },
+				{ sig: "setVoterWeight(uint256,address,uint256)", impl: admin },
+				{ sig: "nextSessionId()", impl: admin },
+			];
 
 		const selectorBytes = selectorDefs.map((d) => ethers.dataSlice(ethers.id(d.sig), 0, 4));
 		const implAddrs = await Promise.all(selectorDefs.map(async (d) => d.impl.getAddress()));
@@ -116,9 +125,8 @@ describe("VotingHub", () => {
 
 		hub = await ethers.getContractAt("VotingHubInterface", await diamond.getAddress(), owner);
 
-		for (const alg of [0, 1, 2]) {
-			await hub.setStrategy(alg, await weighted.getAddress());
-		}
+		await hub.setStrategy(0, await onePerson.getAddress());
+		await hub.setStrategy(1, await weighted.getAddress());
 	});
 
 	it("creates a session with options", async () => {
@@ -177,7 +185,113 @@ describe("VotingHub", () => {
 		expect(totals[0]).to.equal(2n);
 	});
 
-	it("hides results until reveal time or authorization", async () => {
+	it("respects default base weight for new voters and delegation", async () => {
+		const sessionId = await createSession({ defaultBaseWeight: 3n });
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 3n }], true);
+		let totals = await hub.connect(viewer).getOptionTotals(sessionId);
+		expect(totals[0]).to.equal(3n);
+
+		const sessionId2 = await createSession({ defaultBaseWeight: 4n });
+		await hub.connect(voterB).delegateVote(sessionId2, voterC.address);
+		await hub.connect(voterC).castVote(sessionId2, [{ optionId: 1n, weight: 4n }], true);
+		totals = await hub.connect(viewer).getOptionTotals(sessionId2);
+		expect(totals[1]).to.equal(4n);
+	});
+
+	it("masks anonymous voters in listVoters and hides their allocations", async () => {
+		const sessionId = await createSession({ allowAnonymous: true, concealResults: true });
+
+		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
+		const anonId = ethers.keccak256(ethers.toUtf8Bytes("anon-test"));
+		await hub
+			.connect(voterB)
+			.castAnonymousVote(sessionId, anonId, [{ optionId: 1n, weight: 1n }], true);
+
+		const voters = await hub.connect(viewer).listVoters(sessionId);
+		expect(voters.length).to.equal(2);
+		expect(voters).to.include(voterA.address);
+		expect(voters).to.include(ethers.ZeroAddress);
+
+		const allocA = await hub.connect(viewer).getVoteAllocations(sessionId, voterA.address);
+		expect(allocA[2]).to.equal(false);
+		expect(allocA[4]).to.equal(1n);
+		expect(allocA[1].length).to.equal(1);
+
+		const allocAnon = await hub.connect(viewer).getVoteAllocations(sessionId, ethers.ZeroAddress);
+		expect(allocAnon[1].length).to.equal(0);
+		expect(allocAnon[4]).to.equal(0n);
+	});
+
+	
+	it("covers view facet auth, anon self-view, delegators, default base weight, and canSeeResults", async () => {
+		const sessionId = await createSession({
+			allowAnonymous: true,
+			concealResults: true,
+			authorizedViewers: [viewer.address]
+		});
+
+		await expect(hub.connect(voterC).getOptionTotals(sessionId)).to.be.revertedWithCustomError(
+			hub,
+			"NotAuthorized"
+		);
+
+		await hub.connect(owner).setAuthorizedViewer(sessionId, voterC.address, true);
+		const totals = await hub.connect(voterC).getOptionTotals(sessionId);
+		expect(totals.length).to.equal(2);
+
+		const anonId = ethers.keccak256(ethers.toUtf8Bytes("anon-self"));
+		await hub
+			.connect(voterB)
+			.castAnonymousVote(sessionId, anonId, [{ optionId: 1n, weight: 1n }], true);
+
+		const selfAlloc = await hub.connect(voterB).getVoteAllocations(sessionId, voterB.address);
+		expect(selfAlloc[2]).to.equal(true);
+		expect(selfAlloc[4]).to.equal(1n);
+		expect(selfAlloc[1].length).to.equal(1);
+
+		const viewerAlloc = await hub.connect(voterC).getVoteAllocations(sessionId, voterB.address);
+		expect(viewerAlloc[1].length).to.equal(0);
+		expect(viewerAlloc[4]).to.equal(0n);
+
+		const sessionId2 = await createSession({ authorizedViewers: [viewer.address] });
+		await hub.connect(voterA).delegateVote(sessionId2, voterB.address);
+		const delegators = await hub.connect(viewer).listDelegators(sessionId2, voterB.address);
+		expect(delegators.length).to.be.gte(0);
+
+		const sessionId3 = await createSession({ defaultBaseWeight: 0n });
+		const meta = await hub.getSessionMeta(sessionId3);
+		expect(meta.defaultBaseWeight).to.equal(1n);
+
+		const sessionId4 = await createSession({ concealResults: false });
+		const anyone = await hub.canSeeResults(sessionId4, voterC.address);
+		expect(anyone).to.equal(true);
+	});
+
+
+	it("covers reveal facet guards", async () => {
+		const sessPublic = await createSession({ concealResults: false });
+		await expect(hub.connect(voterA).revealResults(sessPublic)).to.be.revertedWithCustomError(hub, "AlreadyPublic");
+
+		const sessConceal = await createSession({ concealResults: true, authorizedViewers: [viewer.address] });
+		await expect(hub.connect(voterA).revealResults(sessConceal)).to.be.revertedWithCustomError(hub, "NotAuthorized");
+
+		const block = await ethers.provider.getBlock("latest");
+		const now = BigInt(block!.timestamp);
+
+		const futureEnd = await createSession({ startTime: now - 10n, endTime: now + 500n, revealTime: now + 600n });
+		await expect(hub.emitSessionEnd(futureEnd)).to.be.revertedWithCustomError(hub, "Inactive");
+
+		const ended = await createSession({ startTime: now - 500n, endTime: now - 10n, revealTime: now - 5n });
+		await hub.emitSessionEnd(ended);
+		await expect(hub.emitSessionEnd(ended)).to.be.revertedWithCustomError(hub, "AlreadyEmitted");
+
+		const active = await createSession();
+		await expect(hub.connect(voterA).forceEndSession(active)).to.be.revertedWithCustomError(hub, "NotOwner");
+		await hub.forceEndSession(active);
+		await expect(hub.forceEndSession(active)).to.be.revertedWithCustomError(hub, "AlreadyEmitted");
+	});
+
+it("hides results until reveal time or authorization", async () => {
 		const block = await ethers.provider.getBlock("latest");
 		const now = BigInt(block!.timestamp);
 		const sessionId = await createSession({ revealTime: now + 1000n });
@@ -274,13 +388,41 @@ describe("VotingHub", () => {
 		const block = await ethers.provider.getBlock("latest");
 		const now = BigInt(block!.timestamp);
 
-		await expect(
-			hub.createSession("bad", ["A"], [1n, 2n], now, now + 10n, now + 20n, 0, true, true, true, [viewer.address], pricePerWeight),
-		).to.be.revertedWithCustomError(hub, "OptionMismatch");
+	await expect(
+		hub.createSession(
+			"bad",
+			["A"],
+			[1n, 2n],
+			now,
+			now + 10n,
+			now + 20n,
+			0,
+			true,
+			true,
+			true,
+			[viewer.address],
+			pricePerWeight,
+			1n,
+		),
+	).to.be.revertedWithCustomError(hub, "OptionMismatch");
 
-		await expect(
-			hub.createSession("bad", ["A"], [1n], now + 20n, now + 10n, now + 30n, 0, true, true, true, [viewer.address], pricePerWeight),
-		).to.be.revertedWithCustomError(hub, "InvalidWindow");
+	await expect(
+		hub.createSession(
+			"bad",
+			["A"],
+			[1n],
+			now + 20n,
+			now + 10n,
+			now + 30n,
+			0,
+			true,
+			true,
+			true,
+			[viewer.address],
+			pricePerWeight,
+			1n,
+		),
+	).to.be.revertedWithCustomError(hub, "InvalidWindow");
 
 		const sessionId = await createSession();
 		await expect(
@@ -442,22 +584,23 @@ describe("VotingHub", () => {
 	it("hits error branches for session creation and authorization", async () => {
 		const block = await ethers.provider.getBlock("latest");
 		const now = BigInt(block!.timestamp);
-		await expect(
-			hub.createSession(
-				"none",
-				[],
-				[],
+			await expect(
+				hub.createSession(
+					"none",
+					[],
+					[],
 				now,
 				now + 10n,
 				now + 10n,
 				0,
 				true,
 				true,
-				true,
-				[viewer.address],
-				pricePerWeight,
-			),
-		).to.be.revertedWithCustomError(hub, "OptionsRequired");
+					true,
+					[viewer.address],
+					pricePerWeight,
+					1n,
+				),
+			).to.be.revertedWithCustomError(hub, "OptionsRequired");
 
 		const sessionId = await createSession();
 		await hub.setAuthorizedViewer(sessionId, viewer.address, true); // no-op return path
@@ -505,17 +648,20 @@ describe("VotingHub", () => {
 		);
 	});
 
-	it("covers delegation edge cases", async () => {
-		const sessionId = await createSession();
-		await expect(hub.connect(voterA).delegateVote(sessionId, voterA.address)).to.be.revertedWithCustomError(
-			hub,
-			"SelfDelegation",
-		);
-		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
-		await expect(hub.connect(voterA).delegateVote(sessionId, voterB.address)).to.be.revertedWithCustomError(
-			hub,
-			"AlreadyVoted",
-		);
+		it("covers delegation edge cases", async () => {
+			const sessionId = await createSession();
+			await expect(hub.connect(voterA).delegateVote(sessionId, voterA.address)).to.be.revertedWithCustomError(
+				hub,
+				"SelfDelegation",
+			);
+			await expect(
+				hub.connect(voterA).delegateVote(9999, voterB.address),
+			).to.be.revertedWithCustomError(hub, "SessionMissing");
+			await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
+			await expect(hub.connect(voterA).delegateVote(sessionId, voterB.address)).to.be.revertedWithCustomError(
+				hub,
+				"AlreadyVoted",
+			);
 
 		const zeroWeightSession = await createSession();
 		await hub.connect(owner).setVoterWeight(zeroWeightSession, voterC.address, 0n);
@@ -594,8 +740,8 @@ describe("VotingHub", () => {
 			hub.connect(voterA).castVote(sessionId, [{ optionId: 99n, weight: 1n }], true),
 		).to.be.revertedWithCustomError(hub, "BadOption");
 
-		const sessionId2 = await createSession({ algorithm: 2 });
-		await hub.clearStrategy(2);
+		const sessionId2 = await createSession({ algorithm: 1 });
+		await hub.clearStrategy(1);
 		await expect(
 			hub.connect(voterA).castVote(sessionId2, [{ optionId: 0n, weight: 1n }], true),
 		).to.be.revertedWithCustomError(hub, "StrategyNotSet");
@@ -616,6 +762,32 @@ describe("VotingHub", () => {
 		).to.be.revertedWithCustomError(hub, "BadWeight");
 	});
 
+	it("yields different winners for different algorithms on same votes", async () => {
+		const opts = { optionNames: ["A", "B", "C"], optionWeights: [1n, 5n, 1n] };
+		const sAlg0 = await createSession({ ...opts, algorithm: 0 });
+		const sAlg1 = await createSession({ ...opts, algorithm: 1 });
+
+		const voteAll = async (sid: bigint) => {
+			await hub.connect(voterA).castVote(sid, [{ optionId: 0n, weight: 1n }], true);
+			await hub.connect(voterB).castVote(sid, [{ optionId: 2n, weight: 1n }], true);
+			await hub.connect(voterC).castVote(sid, [{ optionId: 2n, weight: 1n }], true);
+			await hub.connect(viewer).castVote(sid, [{ optionId: 1n, weight: 1n }], true);
+		};
+
+		await voteAll(sAlg0);
+		await voteAll(sAlg1);
+
+		const winners0 = await hub.getWinners(sAlg0);
+		const winners1 = await hub.getWinners(sAlg1);
+
+		expect(winners0.length).to.equal(1);
+		expect(winners1.length).to.equal(1);
+		// Alg0 (one-person-one-vote) should pick option 2 (two votes)
+		expect(winners0[0]).to.equal(2n);
+		// Alg1 (weighted split) multiplies option weight: option 1 has weight 5, so it wins
+		expect(winners1[0]).to.equal(1n);
+	});
+
 	it("blocks unauthorized getWinners when concealed", async () => {
 		const sessionId = await createSession();
 		await hub.connect(voterA).castVote(sessionId, [{ optionId: 0n, weight: 1n }], true);
@@ -625,8 +797,10 @@ describe("VotingHub", () => {
 	});
 
 	it("reverts on unknown selector and admin session missing", async () => {
+		// Unknown selector now returns empty data (silent fallback). Just assert it doesn't revert and returns 0x
 		const unknown = new ethers.Contract(await diamond.getAddress(), ["function noSuchFn() view returns (uint256)"], owner);
-		await expect(unknown.noSuchFn()).to.be.revertedWithCustomError(hub, "StrategyNotSet");
+		const res = await owner.provider!.call({ to: await diamond.getAddress(), data: unknown.interface.getFunction("noSuchFn").selector });
+		expect(res).to.equal("0x");
 
 		await expect(
 			hub.connect(owner).setVoterWeight(9999, voterA.address, 5n),

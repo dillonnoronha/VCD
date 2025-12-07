@@ -37,6 +37,16 @@ contract RevealFacet is VotingErrors {
 		emit SessionEnded(sessionId);
 	}
 
+	/// @notice Owner can end a session early (before endTime). Does NOT reveal results.
+	function forceEndSession(uint256 sessionId) external onlyOwner {
+		Session storage s = _session(sessionId);
+		if (s.endedEventEmitted) revert AlreadyEmitted();
+		// End immediately
+		s.endTime = block.timestamp;
+		s.endedEventEmitted = true;
+		emit SessionEnded(sessionId);
+	}
+
 	function _session(uint256 sessionId) internal view returns (Session storage s) {
 		s = VotingStorage.layout().sessions[sessionId];
 		if (s.endTime == 0) revert SessionMissing();

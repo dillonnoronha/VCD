@@ -32,11 +32,13 @@ contract CoreFacet is VotingErrors {
 		bool allowMultiVoteWithEth,
 		bool concealResults,
 		address[] memory authorizedViewers,
-		uint256 pricePerWeight
+		uint256 pricePerWeight,
+		uint256 defaultBaseWeight
 	) external onlyOwner returns (uint256 id) {
 		if (optionNames.length == 0) revert OptionsRequired();
 		if (optionNames.length != optionWeights.length) revert OptionMismatch();
 		if (startTime >= endTime) revert InvalidWindow();
+		if (uint8(algorithm) > uint8(Algorithm.WeightedSplit)) revert InvalidAlgorithm();
 
 		VotingStorage.Layout storage ds = VotingStorage.layout();
 		id = ds.nextSessionId++;
@@ -50,6 +52,7 @@ contract CoreFacet is VotingErrors {
 		s.allowMultiVoteWithEth = allowMultiVoteWithEth;
 		s.concealResults = concealResults;
 		s.pricePerWeight = pricePerWeight;
+		s.defaultBaseWeight = defaultBaseWeight == 0 ? 1 : defaultBaseWeight;
 
 		for (uint256 i; i < optionNames.length; ) {
 			uint256 optWeight = optionWeights[i] == 0 ? 1 : optionWeights[i];
@@ -114,123 +117,39 @@ contract CoreFacet is VotingErrors {
 		emit VoteUpdated(sessionId, msg.sender, bytes32(0), _sumAllocations(allocations));
 	}
 
-	function getOptionTotals(uint256 sessionId) external view returns (uint256[] memory totals) {
-		Session storage s = _session(sessionId);
-		if (!_canSeeResults(s, msg.sender)) revert NotAuthorized();
-		totals = new uint256[](s.options.length);
-		for (uint256 i; i < s.options.length; ) {
-			totals[i] = s.optionTotals[i];
+	function _session(uint256 sessionId) internal view returns (Session storage s) {
+		s = VotingStorage.layout().sessions[sessionId];
+		if (s.endTime == 0) revert SessionMissing();
+	}
+
+	function _isActive(Session storage s) internal view returns (bool) {
+		return block.timestamp >= s.startTime && block.timestamp < s.endTime;
+	}
+
+	function _availableWeight(VoterState storage st) internal view returns (uint256) {
+		uint256 base = st.exists ? st.baseWeight : 1;
+		return base + st.purchasedWeight + st.receivedDelegatedWeight;
+	}
+
+		function _ensureState(Session storage s, address voter) internal returns (VoterState storage) {
+			VoterState storage st = s.voterStates[voter];
+			if (!st.exists) {
+				st.exists = true;
+				st.baseWeight = s.defaultBaseWeight == 0 ? 1 : s.defaultBaseWeight;
+				st.receivedDelegatedWeight = 0;
+			}
+			return st;
+		}
+
+	function _sumAllocations(Allocation[] memory allocations) internal pure returns (uint256 total) {
+		for (uint256 i; i < allocations.length; ) {
+			total += allocations[i].weight;
 			unchecked {
 				++i;
 			}
 		}
 	}
 
-	function getWinners(uint256 sessionId) external view returns (uint256[] memory winners) {
-		Session storage s = _session(sessionId);
-		if (!_canSeeResults(s, msg.sender)) revert NotAuthorized();
-		uint256 best;
-		for (uint256 i; i < s.options.length; ) {
-			uint256 val = s.optionTotals[i];
-			if (val > best) best = val;
-			unchecked {
-				++i;
-			}
-		}
-		uint256 count;
-		for (uint256 j; j < s.options.length; ) {
-			if (s.optionTotals[j] == best) count++;
-			unchecked {
-				++j;
-			}
-		}
-		winners = new uint256[](count);
-		uint256 idx;
-		for (uint256 k; k < s.options.length; ) {
-			if (s.optionTotals[k] == best) {
-				winners[idx++] = k;
-			}
-			unchecked {
-				++k;
-			}
-		}
-	}
-
-	function getOptions(uint256 sessionId) external view returns (Option[] memory opts) {
-		Session storage s = _session(sessionId);
-		opts = new Option[](s.options.length);
-		for (uint256 i; i < s.options.length; ) {
-			opts[i] = s.options[i];
-			unchecked {
-				++i;
-			}
-		}
-	}
-
-	function getVoteAllocations(uint256 sessionId, address voter)
-		external
-		view
-		returns (VoteStatus status, Allocation[] memory allocations, bool anonymousVote, bytes32 anonId, uint256 usedWeight)
-	{
-		Session storage s = _session(sessionId);
-		if (!_isAuthorizedViewer(s, msg.sender) && msg.sender != voter && msg.sender != VotingStorage.layout().owner) {
-			revert NotAuthorized();
-		}
-		VoteRecord storage vr = s.votes[voter];
-		status = vr.status;
-		anonymousVote = vr.anonymousVote;
-		anonId = vr.anonId;
-		usedWeight = vr.usedWeight;
-		allocations = new Allocation[](vr.allocations.length);
-		for (uint256 i; i < vr.allocations.length; ) {
-			allocations[i] = vr.allocations[i];
-			unchecked {
-				++i;
-			}
-		}
-	}
-
-	function canSeeResults(uint256 sessionId, address viewer) external view returns (bool) {
-		Session storage s = _session(sessionId);
-		return _canSeeResults(s, viewer);
-	}
-
-	function getSessionMeta(uint256 sessionId)
-		external
-		view
-		returns (
-			string memory name,
-			uint256 startTime,
-			uint256 endTime,
-			uint256 revealTime,
-			Algorithm algorithm,
-			bool allowAnonymous,
-			bool allowMultiVoteWithEth,
-			bool concealResults,
-			bool revealed,
-			uint256 optionCount,
-			uint256 pricePerWeight
-		)
-	{
-		Session storage s = _session(sessionId);
-		name = s.name;
-		startTime = s.startTime;
-		endTime = s.endTime;
-		revealTime = s.revealTime;
-		algorithm = s.algorithm;
-		allowAnonymous = s.allowAnonymous;
-		allowMultiVoteWithEth = s.allowMultiVoteWithEth;
-		concealResults = s.concealResults;
-		revealed = s.revealed;
-		optionCount = s.options.length;
-		pricePerWeight = s.pricePerWeight;
-	}
-
-	function listSessions() external view returns (uint256[] memory ids) {
-		ids = VotingStorage.layout().sessionIds;
-	}
-
-	// internal helpers
 	function _cast(
 		uint256 sessionId,
 		address voter,
@@ -260,6 +179,11 @@ contract CoreFacet is VotingErrors {
 		VoteRecord storage vr = s.votes[voter];
 		if (vr.status == VoteStatus.Confirmed) {
 			_applyToTotals(s, vr, false);
+		}
+
+		if (!st.listed) {
+			s.voterList.push(voter);
+			st.listed = true;
 		}
 
 		_storeAllocations(vr, allocations);
@@ -327,49 +251,5 @@ contract CoreFacet is VotingErrors {
 				++i;
 			}
 		}
-	}
-
-	function _session(uint256 sessionId) internal view returns (Session storage s) {
-		s = VotingStorage.layout().sessions[sessionId];
-		if (s.endTime == 0) revert SessionMissing();
-	}
-
-	function _isActive(Session storage s) internal view returns (bool) {
-		return block.timestamp >= s.startTime && block.timestamp < s.endTime;
-	}
-
-	function _availableWeight(VoterState storage st) internal view returns (uint256) {
-		uint256 base = st.exists ? st.baseWeight : 1;
-		return base + st.purchasedWeight;
-	}
-
-	function _ensureState(Session storage s, address voter) internal returns (VoterState storage) {
-		VoterState storage st = s.voterStates[voter];
-		if (!st.exists) {
-			st.exists = true;
-			st.baseWeight = 1;
-		}
-		return st;
-	}
-
-	function _sumAllocations(Allocation[] memory allocations) internal pure returns (uint256 total) {
-		for (uint256 i; i < allocations.length; ) {
-			total += allocations[i].weight;
-			unchecked {
-				++i;
-			}
-		}
-	}
-
-	function _canSeeResults(Session storage s, address viewer) internal view returns (bool) {
-		if (!s.concealResults) return true;
-		if (s.revealed) return true;
-		if (block.timestamp >= s.revealTime) return true;
-		if (!_isActive(s)) return true;
-		return _isAuthorizedViewer(s, viewer) || viewer == VotingStorage.layout().owner;
-	}
-
-	function _isAuthorizedViewer(Session storage s, address viewer) internal view returns (bool) {
-		return s.authorizedViewers[viewer];
 	}
 }

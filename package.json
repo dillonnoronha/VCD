@@ -16,5 +16,8 @@
     "forge-std": "github:foundry-rs/forge-std#v1.9.4",
     "mocha": "^11.7.5",
     "typescript": "~5.8.0"
+  },
+  "scripts": {
+    "make": "rm -rf ./ignition/deployments/chain-31337 && npx hardhat ignition deploy ./ignition/modules/VotingDiamond.ts --network lan --parameters '{\"VotingDiamondModule\":{\"owner\":\"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\"}}' && node scripts/update.cjs"
   }
 }

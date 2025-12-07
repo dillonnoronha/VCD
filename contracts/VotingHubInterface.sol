@@ -63,7 +63,8 @@ interface VotingHubInterface {
 		bool allowMultiVoteWithEth,
 		bool concealResults,
 		address[] memory authorizedViewers,
-		uint256 pricePerWeight
+		uint256 pricePerWeight,
+		uint256 defaultBaseWeight
 	) external returns (uint256 id);
 	function castVote(uint256 sessionId, Allocation[] memory allocations, bool finalize) external;
 	function castAnonymousVote(uint256 sessionId, bytes32 anonId, Allocation[] memory allocations, bool finalize) external;
@@ -74,6 +75,7 @@ interface VotingHubInterface {
 	function purchaseWeight(uint256 sessionId) external payable;
 	function revealResults(uint256 sessionId) external;
 	function emitSessionEnd(uint256 sessionId) external;
+	function forceEndSession(uint256 sessionId) external;
 	function getOptionTotals(uint256 sessionId) external view returns (uint256[] memory totals);
 	function getWinners(uint256 sessionId) external view returns (uint256[] memory winners);
 	function getOptions(uint256 sessionId) external view returns (Option[] memory opts);
@@ -81,7 +83,19 @@ interface VotingHubInterface {
 		external
 		view
 		returns (VoteStatus status, Allocation[] memory allocations, bool anonymousVote, bytes32 anonId, uint256 usedWeight);
+    function listVoters(uint256 sessionId) external view returns (address[] memory voters);
 	function canSeeResults(uint256 sessionId, address viewer) external view returns (bool);
+	function getVoterState(uint256 sessionId, address voter)
+		external
+		view
+		returns (
+			uint256 baseWeight,
+			uint256 purchasedWeight,
+			address delegate,
+			bool delegated,
+			uint256 availableWeight,
+			uint256 receivedDelegatedWeight
+		);
 	function getSessionMeta(uint256 sessionId)
 		external
 		view
@@ -96,7 +110,9 @@ interface VotingHubInterface {
 			bool concealResults,
 			bool revealed,
 			uint256 optionCount,
-			uint256 pricePerWeight
+			uint256 pricePerWeight,
+			uint256 defaultBaseWeight
 		);
 	function listSessions() external view returns (uint256[] memory ids);
+	function listDelegators(uint256 sessionId, address delegatee) external view returns (address[] memory voters);
 }

@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 enum Algorithm {
 	OnePersonOneVote,
-	RankedChoice,
 	WeightedSplit
 }
 
@@ -34,8 +33,10 @@ struct VoteRecord {
 struct VoterState {
 	uint256 baseWeight;
 	uint256 purchasedWeight;
+	uint256 receivedDelegatedWeight;
 	bool delegated;
 	address delegate;
+	bool listed;
 	bool exists;
 }
 
@@ -56,7 +57,9 @@ struct Session {
 	bool revealed;
 	bool endedEventEmitted;
 	uint256 pricePerWeight;
+	uint256 defaultBaseWeight;
 	Option[] options;
+	address[] voterList;
 	mapping(address => bool) authorizedViewers;
 	mapping(address => VoterState) voterStates;
 	mapping(address => VoteRecord) votes;
