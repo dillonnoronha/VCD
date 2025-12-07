@@ -33,3 +33,8 @@ Thumbs.db
 /SECURITY.md
 /mise.toml
 /MEMORY.md
+
+# Ignore .npm-cache
+.npm-cache/
+
+package-lock.json
